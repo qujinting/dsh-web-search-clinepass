@@ -11,6 +11,10 @@
  *      then the agent-default-model setting,
  *   3. the llm-pi-ai settings namespace for that route's endpoint and key ref.
  *
+ * Steps 2 and 3 read namespaces this plugin does not own, through whichever read
+ * path the mounted settings service has (0.1.5's get(ns) or 0.1.7's describe()
+ * projection) - see {@link readSettings}.
+ *
  * @module dsh-web-search-clinepass/route
  */
 import { credentialRef } from '@deepseek-ai/dsh-credentials';
@@ -42,13 +46,51 @@ export function isOpenAiChatApi(api) {
 	return OPENAI_CHAT_APIS.has(api.trim().toLowerCase());
 }
 
-/** Read one registered settings namespace, tolerating an absent settings service or namespace. */
+/**
+ * Read one namespace out of the dsh 0.1.7 settings projection.
+ *
+ * There the service owns no per-namespace accessor: a section IS a plugin Config
+ * entry, and `describe()` is the only read path - the same call the settings page
+ * makes. Each row carries the entry id as `ns` and its live value as `value`, with
+ * volatile references already flattened, so a plain object type check is enough.
+ *
+ * @param settings - the settings service.
+ * @param ns - the entry id to look for.
+ * @returns the namespace's current value, or undefined.
+ */
+function describedSettings(settings, ns) {
+	if (typeof settings.describe !== 'function') return undefined;
+	const rows = settings.describe();
+	if (!Array.isArray(rows)) return undefined;
+	const value = rows.find((row) => row?.ns === ns)?.value;
+	return value === null || typeof value !== 'object' ? undefined : value;
+}
+
+/**
+ * Read one registered settings namespace, tolerating an absent settings service
+ * or namespace.
+ *
+ * The two harness settings models expose different read paths, so this asks
+ * whichever one is mounted, exactly like `apply()` does for the write side:
+ * 0.1.5 served `get(ns)` for every installed section, 0.1.7 replaced it with the
+ * `describe()` projection and has no `get` at all. Missing this is not a graceful
+ * degradation: `llm-pi-ai` supplies the route's `baseURL` and `apiKeyEnv`, so a
+ * read that always fails makes the provider report itself unavailable and every
+ * `web_search` fails with WEB_PROVIDER_CONFIGURED_UNAVAILABLE.
+ *
+ * @param ctx - the plugin context.
+ * @param ns - the settings namespace (the owning profile entry id on 0.1.7).
+ * @returns the namespace's current value, or undefined when nothing serves it.
+ */
 export function readSettings(ctx, ns) {
 	const settings = ctx.get('settings');
 	if (settings === undefined || settings === null) return undefined;
 	try {
-		const value = settings.get(ns);
-		return value === null || typeof value !== 'object' ? undefined : value;
+		if (typeof settings.get === 'function') {
+			const value = settings.get(ns);
+			if (value !== null && typeof value === 'object') return value;
+		}
+		return describedSettings(settings, ns);
 	} catch {
 		return undefined;
 	}

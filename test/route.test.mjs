@@ -38,6 +38,23 @@ function agentWith(header, agentOptions) {
 	};
 }
 
+/**
+ * A context whose settings service looks like dsh 0.1.7's: no get(ns) at all,
+ * only the describe() projection, which returns `{ ns, value }` rows. This is the
+ * shape the running harness mounts, so the route has to resolve through it.
+ */
+function formsCtx(options = {}) {
+	const rows = options.rows ?? [];
+	return {
+		get(name) {
+			if (name === 'settings') return { describe: () => rows };
+			if (name === 'credentials') return options.credentials;
+			if (name === 'agents') return { currentInitiator: () => options.agent };
+			return undefined;
+		},
+	};
+}
+
 const resolve = (raw) => Config(raw ?? {});
 
 test('joins the chat-completions path once', () => {
@@ -138,4 +155,36 @@ test('a malformed base URL is rejected instead of throwing', () => {
 	const config = resolve({ baseURL: 'not-a-url', apiKeyEnv: 'X_KEY' });
 	const ctx = fakeCtx({ agent: agentWith({ provider: 'clinepass', model: 'm' }) });
 	assert.equal(resolveTarget(ctx, config), undefined);
+});
+
+test('the 0.1.7 settings projection serves the route when get(ns) does not exist', () => {
+	const config = resolve({});
+	const ctx = formsCtx({
+		rows: [{ ns: 'llm-pi-ai', value: CLINEPASS_PI_AI }],
+		agent: agentWith({ provider: 'clinepass', model: 'cline-pass/deepseek-v4.1-flash' }),
+	});
+	const target = resolveTarget(ctx, config);
+	assert.notEqual(target, undefined, 'a settings service without get(ns) must still resolve the route');
+	assert.equal(target.endpoint, 'https://api.cline.bot/api/v1/chat/completions');
+	assert.equal(target.apiKeyEnv, 'CLINEPASS_API_KEY');
+	assert.equal(target.headers['x-route'], 'pi-ai');
+	assert.equal(target.source, 'session request header');
+});
+
+test('the 0.1.7 projection also serves the agent-default-model fallback', () => {
+	const ctx = formsCtx({
+		rows: [
+			{ ns: 'other-entry', value: { ignored: true } },
+			{ ns: 'llm-pi-ai', value: CLINEPASS_PI_AI },
+			{ ns: 'agent-default-model', value: { provider: 'clinepass', model: 'm2', reasoningEffort: 'high' } },
+		],
+	});
+	const target = resolveTarget(ctx, resolve({}));
+	assert.equal(target.model, 'm2');
+	assert.equal(target.source, 'agent-default-model setting');
+});
+
+test('a namespace the 0.1.7 projection does not serve leaves the route unresolved', () => {
+	const ctx = formsCtx({ rows: [{ ns: 'something-else', value: CLINEPASS_PI_AI }], agent: agentWith({ provider: 'clinepass', model: 'm' }) });
+	assert.equal(resolveTarget(ctx, resolve({})), undefined);
 });

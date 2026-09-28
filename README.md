@@ -113,13 +113,52 @@ dsh 0.1.7 重做了设置：插件的 Config 条目**就是**它的设置项，�
 | host 半边 | `settings.installSection(ctx, 'web-search-clinepass', Config, …)` | `settings.configure({ auto: false }, ctx.fiber)` + 条目自身 Config |
 | 可编辑字段 | 整个 section 都进表单 | 只有标了 `.volatile()` 的字段（`src/config.js` 的 `editable()` 包装；老版 schemastery 没有这个方法就自动退化成普通字段） |
 | 读值 | section 解析结果（普通值） | volatile 引用，`.get()` 取当前值；`normalizeConfig()` 在每个边界统一摊平 |
+| 读**别人的**命名空间（`llm-pi-ai` / `agent-default-model`，用来解路由和兜底模型） | `settings.get(ns)` | `settings.describe()` 返回的 `{ ns, value }` 投影（0.1.7 的服务**没有** `get`）；见「0.3.1 修的那个坑」 |
 | 卡片槽位 | `settings.plugin.item` + `ctx.settingsScope` | `plugins.row.config`（key = `<包名>#<行 id>`）+ 页面传入的 `form`（`state` + `mutate`） |
 | 卡片位置 | 设置 → 插件 → 插件配置 | 左侧「插件」→ 已安装 → 该包 → 组件行「配置」 |
 | 设置落在 | `<DSH_HOME>/settings.yaml` | `<DSH_HOME>/profiles/<profile>/cordis.patch.yml` |
 
 分流全靠**服务探测**，没有版本号判断：host 半边看 settings 服务上有没有 `configure`（有就新、没有就旧），
+`readSettings()` 同样先问 `get`、没有再问 `describe`（`src/route.js`）；
 浏览器半边分别 `ctx.inject(['settingsScope'], …)` 与 `ctx.inject(['configForms'], …)`，两边的 `inject` 只会有
 一边被满足，所以只会注册一张卡片。
+
+### 0.3.1 修的那个坑：0.1.7 上 `web_search` 报 "registered but unavailable"
+
+0.3.0（也就是「同时支持两套 settings」那版）只把**自己这一条的 Config** 迁到了 0.1.7 的模型，
+**读别人的命名空间**那条路忘了迁：`readSettings()` 仍然只调 `settings.get(ns)`，而 0.1.7 的
+`@deepseek-ai/dsh-settings` 里根本没有 `get`（`installSection` 也没了），异常被 `try/catch` 吞掉后一律返回
+`undefined`。后果是 `llm-pi-ai` 永远读不到，`resolveTarget()` 拿不到 `baseURL` / `apiKeyEnv`，
+`available()` 恒为 `false`，于是每次搜索都变成：
+
+```
+Error: configured web provider "clinepass" is registered but unavailable
+    (WEB_PROVIDER_CONFIGURED_UNAVAILABLE)
+```
+
+只发生在 dsh 0.1.7+ 上；0.1.5 因为 `get` 还在，行为不变。修法是给 `readSettings()` 加上 0.1.7 的读法
+（`settings.describe()` 的 `{ ns, value }` 投影，内部已经把 volatile 引用摊平）：
+
+```js
+if (typeof settings.get === 'function') { /* 0.1.5 */ }
+return describedSettings(settings, ns);      // 0.1.7: describe() 里按 ns 找 value
+```
+
+**升级后仍然报这个错、又不能马上重装插件时**，可以先在 profile 的 `cordis.patch.yml` 里把路由钉死
+（`provider` / `model` 是 volatile 字段，写在 patch 里同样生效；`baseURL` / `apiKeyEnv` 是普通字段，
+所以它们本来就只能从 patch 配，卡片里没有这两栏）：
+
+```yaml
+- id: web-search-clinepass
+  config:
+    provider: clinepass
+    model: cline-pass/deepseek-v4.1-flash
+    baseURL: https://api.cline.bot/api/v1
+    api: openai-completions
+    apiKeyEnv: CLINEPASS_API_KEY
+```
+
+代价是这条搜索不再跟随 UI 里选的模型；把插件升到 0.3.1 后删掉这段即可恢复跟随。
 
 ## 配置
 
@@ -143,7 +182,8 @@ dsh 0.1.7 重做了设置：插件的 Config 条目**就是**它的设置项，�
 > 这里**没有**「把搜索记录写进会话日志」的开关：DSH 会因此拒绝加载整份会话，原因见《为什么不再写会话日志事件》。
 
 绝大多数情况什么都不用配：会话模型是 `clinepass` 这类 OpenAI 兼容网关时，路由信息全部来自
-`llm-pi-ai.providers.<route>`（`api` / `baseURL` / `apiKeyEnv`）。
+`llm-pi-ai.providers.<route>`（`api` / `baseURL` / `apiKeyEnv`）——0.1.5 通过 `settings.get('llm-pi-ai')` 读，
+0.1.7 通过 `settings.describe()` 读（见《0.3.1 修的那个坑》）。
 
 ## 工具选择与花费
 
@@ -231,7 +271,8 @@ Sources:
 
 ## 已验证到哪一步
 
-- **单元测试** `npm test`：**56 项**。解析与路由解析 19 项（中文标点、markdown 链接、去重、截断、会话跟随、切换模型、协议不兼容、显式钉死、fallback），
+- **单元测试** `npm test`：**59 项**。解析与路由解析 **22 项**（中文标点、markdown 链接、去重、截断、会话跟随、切换模型、协议不兼容、显式钉死、fallback、
+  以及 0.1.7 的读法：只有 `describe()` 没有 `get()` 时仍能解出路由与端点、`agent-default-model` 同样可读、投影里没有该命名空间时仍判不可用），
   搜索路径与修复工具 15 项（搜索不写会话事件、不可用路由不碰会话、schema 不再暴露写入开关、请求体带 `tools[].config`、
   四个工具各自的 config 字段映射、未知 tool id 只发裸 id、system prompt 的搜索次数上限、未支持事件识别、
   信封标记、帧结构保持、dry-run、活跃会话与 `session.lock` 保护、只扫描当前代际），
@@ -242,8 +283,17 @@ Sources:
   默认折叠只渲染 header、命名空间缺失时的降级渲染、样式表只读主题 token 且全部命名空间化、Tag/Switch/chevron 走基座模块、
   布尔字段是「左标签 + 右开关」的 toggle row、搜索工具是单选 radio 列表且页面里没有 select、只提供文档里的四个工具、
   搜索工具那一栏明说次数上限只是建议）。
-  其中 10 项渲染测试需要 `react-dom`，缺失时跳过（`npm test` 报 46 通过 + 10 跳过）；
-  用真 React 18.3.1 跑过全 **56 项（0 skipped）**。
+  其中 10 项渲染测试需要 `react-dom`，缺失时跳过（本机 `npm test` 报 49 通过 + 10 跳过；
+   之前 56 项时用真 React 18.3.1 跑过全 56 项、0 skipped）。
+- **真实 0.1.7 settings 实现（0.3.1 的回归验证）**：不启动整个 harness，而是直接把**真实的**
+  `SettingsForms.prototype.describe`（未打桩，只喂给它一个 `configEditor.configuration()` 的替身）跑在**真实的**
+  `@deepseek-ai/dsh-llm-pi-ai` 的 Config schema 与本机 profile 的真实路由值上：`describe()` 输出
+  `[{ ns: 'llm-pi-ai', value: { providers: { clinepass: { baseURL: 'https://api.cline.bot/api/v1' } } } }]`。
+  再把这同一个 ctx 分别喂给 HEAD（0.3.0）与修好后的 `resolveTarget()`：
+  0.3.0 在 0.1.7 服务下 `available() === false`（就是那条 `registered but unavailable`），修好后同一个 ctx
+  `available() === true`、端点 `https://api.cline.bot/api/v1/chat/completions`、来源 `session request header`；
+  0.1.5 的 `get(ns)` ctx 在修改前后都照常解出。**未做**的验证：真实 GUI 里重启 harness 后再跑一次 `web_search`
+  （插件是 `file:` 装进 profile 的硬链接副本，改仓库代码要重新 `dsh plugin add` + 重启才生效）。
 - **真实 GUI 验收（与内置卡片逐项对齐）**：用本机 Chrome 走 CDP 直连正在运行的 `dsh web`（临时 profile + 用本机
   `client-connection/browser-session` 签名密钥铸的会话 cookie，密钥不出本机），把这张卡和内置「网页搜索」卡放在**同一页**逐项量：
   折叠态两张卡都是 **564×75**（header padding 14/16、gap 12、标题 15px/600、摘要 13px、chevron 14×14 且 `viewBox="0 0 14 14"`）；

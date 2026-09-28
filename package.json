@@ -1,6 +1,6 @@
 {
   "name": "dsh-web-search-clinepass",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "DSH plugin (dsh 0.1.5 and 0.1.7+): a ctx.web search provider that searches with the session's currently selected model and its gateway-native search tool (vercel:perplexity_search and friends), replacing the model-hardcoded built-in DeepSeek search provider.",
   "type": "module",
   "main": "src/index.js",
