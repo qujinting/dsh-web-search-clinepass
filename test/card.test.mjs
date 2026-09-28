@@ -103,14 +103,21 @@ test('the bundle registers the card under the settings namespace key', async () 
 	assert.deepEqual(module.inject, ['slots', 'settingsScope']);
 	const bound = [];
 	const registered = [];
+	let ledgerReads = 0;
 	const ctx = {
 		settingsScope: { bind: (spec) => { bound.push(spec); return fakeScope(); } },
 		slots: {
-			inject: (name, generator) => {
+			// The ledger is empty for the first reads, then carries the deployment's
+			// own cards: registration must wait for it, so this card ranks last.
+			entries: (name) => {
 				assert.equal(name, 'settings.plugin.item');
-				for (const entry of generator()) registered.push(entry);
+				ledgerReads += 1;
+				return ledgerReads < 3 ? [] : [{ options: { key: 'shell' } }, { options: { key: 'web-search-deepseek' } }];
 			},
-			register: (entry, component) => ({ entry, component }),
+			register: (entry, component) => {
+				registered.push({ entry, component, ledgerReads });
+				return () => {};
+			},
 		},
 	};
 	await module.apply(ctx);
@@ -120,6 +127,7 @@ test('the bundle registers the card under the settings namespace key', async () 
 	assert.equal(registered[0].entry.key, 'web-search-clinepass');
 	assert.equal(registered[0].entry.inject().scope.snapshot.revision, 7);
 	assert.equal(typeof registered[0].component, 'function');
+	assert.ok(registered[0].ledgerReads >= 3, 'registration waits for the cards the deployment ships');
 });
 
 test('the write planner stores only real changes and clears defaults', async () => {
@@ -156,11 +164,23 @@ test('the card renders its controls against a fake scope', async (t) => {
 	if (React === undefined || renderToStaticMarkup === undefined) { t.skip('react-dom is not available on this machine'); return; }
 	const module = await loadClientBundle(React);
 	const scope = fakeScope({ section: { tool: 'vercel:parallel_search' }, user: { tool: 'vercel:parallel_search' } });
-	const markup = renderToStaticMarkup(React.createElement(module.__internals.WebSearchClinepassCard, { scope }));
+	const markup = renderToStaticMarkup(React.createElement(module.__internals.WebSearchClinepassCard, { scope, defaultOpen: true }));
 	assert.match(markup, /网页搜索（当前模型）/u);
 	assert.match(markup, /web-search-clinepass-tool/u);
 	assert.match(markup, /vercel:parallel_search/u);
 	assert.match(markup, /vercel:exa_search/u, 'every gateway tool is offered');
+});
+
+test('the card starts collapsed and only its header is rendered', async (t) => {
+	if (React === undefined || renderToStaticMarkup === undefined) { t.skip('react-dom is not available on this machine'); return; }
+	const module = await loadClientBundle(React);
+	const scope = fakeScope({ section: { tool: 'vercel:parallel_search' } });
+	const markup = renderToStaticMarkup(React.createElement(module.__internals.WebSearchClinepassCard, { scope }));
+	assert.match(markup, /<li /u, 'a card is a list item, like the ones the deployment ships');
+	assert.match(markup, /aria-expanded="false"/u);
+	assert.doesNotMatch(markup, /web-search-clinepass-tool/u, 'the body stays out of the DOM while collapsed');
+	assert.match(markup, /网页搜索（当前模型）/u);
+	assert.match(markup, /viewBox="0 0 16 16"/u, 'the header carries the chevron');
 });
 
 test('a missing namespace renders the unavailable state instead of crashing', async (t) => {

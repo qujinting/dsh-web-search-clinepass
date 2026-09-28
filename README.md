@@ -98,7 +98,8 @@ node install.mjs --profile web --uninstall
 | `temperature` | 未设置 | 不写就不发这个字段（部分推理模型会拒绝它）。 |
 | `maxSources` | `10` | 返回给 seam 的来源上限；`dsh-tool-web` 的 `searchMaxResults` 还会再截一次。 |
 | `instructions` | 空 | 追加到搜索指令末尾的额外要求。 |
-| `recordRequests` | `true` | 每次搜索往会话日志追加一条 `web/clinepass-search-request`（含耗时、工具调用次数、gatewayCost）。 |
+
+> 这里**没有**「把搜索记录写进会话日志」的开关：DSH 会因此拒绝加载整份会话，原因见《为什么不再写会话日志事件》。
 
 绝大多数情况什么都不用配：会话模型是 `clinepass` 这类 OpenAI 兼容网关时，路由信息全部来自
 `llm-pi-ai.providers.<route>`（`api` / `baseURL` / `apiKeyEnv`）。
@@ -155,18 +156,22 @@ Sources:
 
 ## 已验证到哪一步
 
-- **单元测试** `npm test`：24 项。解析与路由解析 19 项（中文标点、markdown 链接、去重、截断、会话跟随、切换模型、协议不兼容、显式钉死、fallback），
+- **单元测试** `npm test`：36 项。解析与路由解析 19 项（中文标点、markdown 链接、去重、截断、会话跟随、切换模型、协议不兼容、显式钉死、fallback），
+  搜索路径与修复工具 12 项（搜索不写会话事件、不可用路由不碰会话、schema 不再暴露写入开关、未支持事件识别、
+  信封标记、帧结构保持、dry-run、活跃会话与 `session.lock` 保护、只扫描当前代际），
   浏览器半边 5 项（槽位注册的 name/key/inject、写入计划器、默认值即清除覆盖、卡片静态渲染、命名空间缺失时的降级渲染）。
-  其中 2 项渲染测试需要 `react-dom`，缺失时跳过；用真 React 18.3.1 跑过全 24 项（0 skipped）。
+  其中 2 项渲染测试需要 `react-dom`，缺失时跳过；用真 React 18.3.1 跑过全 36 项（0 skipped）。
 - **真实 seam 集成** `node test/live-gateway.mjs`：用真实的 `WebRuntime`（`@deepseek-ai/dsh-web`）注册本供应商，
   按 `searchProvider: clinepass` 选中，向 `api.cline.bot` 实发一次搜索，断言来源非空且 `maxResults` 生效。
-- **真实 DSH 端到端**：临时 profile（`@deepseek-ai/dsh-base` + `@deepseek-ai/dsh-headless` + 本插件）跑一次真实任务，
-  会话日志里出现 4 条 `web/clinepass-search-request`，字段为
-  `provider: clinepass` / `model: cline-pass/deepseek-v4.1-flash` / `endpoint: https://api.cline.bot/api/v1/chat/completions` /
-  `tool: vercel:perplexity_search` / `executedSearches: 2,2,4,6`，并带回真实来源链接。
+- **真实 DSH 端到端**：临时 profile（`@deepseek-ai/dsh-base` + `@deepseek-ai/dsh-headless` + 本插件）跑一次真实任务，带回真实来源链接。
+  端到端跑通后**不再产生** `web/clinepass-search-request` 事件；早期版本写进会话日志的那些事件已用
+  `tools/repair-session-events.mjs` 补上 `ignorable: true`（见《为什么不再写会话日志事件》），会话可以正常重新加载。
 
 ## 限制与注意事项
 
+- **不写任何会话日志事件。** 早期版本每次搜索都会追加一条 `web/clinepass-search-request`（v0.1.0 里叫
+  `web/current-model-search-request`），这会让会话在下次 resume 时被**整份**拒绝加载；该行为已删除，也没有重新打开的开关。
+  已被写坏的会话用下一节的工具修复。
 - **只对 OpenAI 兼容且支持供应商端工具的路由生效。** 路由声明了非 chat-completions 协议（例如 `anthropic-messages`）时，
   本供应商直接报告不可用——这是有意的：让网关工具 id 发给不懂它的端点只会得到难懂的错误。
 - **切到非网关模型时 `web_search` 会报 `WEB_PROVIDER_CONFIGURED_UNAVAILABLE`。**
@@ -177,12 +182,53 @@ Sources:
 - **供应商端工具是一次完整的模型回合**：延迟实测 8–15 秒，费用按上面那张表计。
 - 插件不修改任何原生包文件，卸载后原样恢复。
 
+## 为什么不再写会话日志事件
+
+早期版本每次搜索都会往会话日志追加一条 `web/clinepass-search-request`。**这个行为已经删除**，因为它会让会话彻底打不开：
+
+- DSH 的会话读取是 fail-closed 的：`session-persistence` 的 `validateStoredEvents()` 遇到
+  `KNOWN_SESSION_EVENT_TYPES` 之外、信封上没有 `ignorable: true` 的事件时，会拒绝解释**整份**日志，报
+  `SessionFormatUnsupportedError`（「unknown to this harness and not marked ignorable; refusing to interpret the log」）；
+- 白名单由 harness 仓库自己生成，外部插件声明的事件按构造就不在其中；
+- 而 `Session.append()` 的第三个参数只接受 surface 元数据（`surfaceOp` / `sourceEventSeqs`），
+  **插件没有任何途径**给自定义事件写上 `ignorable: true`——写的时候一声不响，下次 resume 才会发现会话已经打不开。
+
+所以只要「会话必须能恢复」，插件唯一安全的选择就是**不写自定义事件**：本插件现在只读 seam，不落任何持久数据。
+诊断信息（路由、耗时、`gatewayCost`）不再进会话日志；需要长期账单统计请在外层采集（例如网关后台）。
+
+### 修复已经被写坏的会话
+
+仓库带一个修复工具 `tools/repair-session-events.mjs`：它只处理**当前代际**的 `session.v3.jsonl.zstd`，
+找出白名单之外且没有 `ignorable: true` 的事件，原样保留帧结构与其它每一行，只给这些信封补上 `ignorable: true`
+（这正是「纯信息性记录」应有的标记）；写盘前先备份、写盘后再解码自检，自检失败自动用备份回滚。
+
+```powershell
+npm run repair-sessions          # 只扫描：列出会被拒绝加载的会话
+npm run repair-sessions:apply    # 修复（不带 --apply 时是 dry-run，不写盘）
+node tools/repair-session-events.mjs repair --session 80bad975-cea1-48af-b509-f2849e8841b0 --apply
+```
+
+- 默认扫描 `$DSH_HOME`（或 `~/.dsh`）下的全部会话；`--home <dir>` 换根目录，`--session <id>` 只处理一个会话。
+- 工具不依赖开发用的那份 `node_modules` junction：它按 `$DSH_HOME/profiles/**/node_modules` 和 DSH 自身的安装目录
+  去找 `@deepseek-ai/dsh-session`（白名单必须来自真正读日志的那个 harness），所以别人 clone 下来就能直接跑。
+- 最近 5 分钟内被写过的会话、或目录里存在 `session.lock` 的会话会被跳过（可能还开着）：**先把 harness 停掉再跑**；
+  确认无风险时用 `--force` 覆盖这两道保护。
+- 备份写在原文件旁边：`session.v3.jsonl.zstd.bak-<时间戳>`（harness 不会读取这个文件名，可随时删除）。
+- 历史代际（`session.jsonl.zstd`、`session.v2.jsonl.zstd` 等）不会被扫描——它们由 harness 自己的迁移链处理。
+
 ## 设置页里的卡片（浏览器半边）
 
 这个插件是**双面**的：Host 半边注册 `web-search-clinepass` 设置命名空间，浏览器半边 `lib/client.js` 在
 `settings.plugin.item` 槽位下、以同一个 namespace 为 key 注册一张卡片。设置页渲染的是两个台账的**交集**
 （Host 已注册的 namespace ∩ 浏览器已注册卡片的 key），所以少了任何一半都看不到卡片：
 只装 Host 半边时，设置里不会出现它（这是 DSH 的设计，不是 bug）。
+
+卡片跟内置卡片同形：`<li>` + 一个带 `aria-expanded` 的 header 按钮（标题 / 摘要 / 未保存标记 / chevron），
+**默认折叠**，保存成功后自动收起，保存失败则保持展开；折叠状态下 header 上会出现「未保存」。
+
+**排序规则**：设置页按 ledger 顺序渲染卡片，而本插件的 `apply` 比设置插件自己注册卡片更早，
+所以「立刻注册」会把这张卡顶到所有内置卡片之前。实现改为**等 ledger 里已经有卡片再入列** ——
+于是它排在本机加载时已有的那些配置之后，而不是钉死在最后（之后再注册的卡片依然排在它后面）。
 
 卡片可改的字段：`enabled`、`tool`（6 个网关搜索工具）、`maxSources`、`timeoutMs`、`maxTokens`、
 `provider` / `model`（钉死路由，可选）、`instructions`。改完点保存；字段恢复成默认值时写的是 `unset`
@@ -205,12 +251,12 @@ node test/live-gateway.mjs    # 真实网关 + 真实 seam（会花一次搜索�
 ```
 
 卡片的两条静态渲染测试需要 `react-dom`（DSH 的模块闭包里没有它），否则会优雅跳过。
-想跑全 24 项就临时装一份并指过去（不写进本仓库）：
+想跑全 36 项就临时装一份并指过去（不写进本仓库）：
 
 ```powershell
 npm install --prefix "$env:TEMP\dsh-card-verify" react@18.3.1 react-dom@18.3.1
 $env:DSH_CARD_TEST_MODULES="$env:TEMP\dsh-card-verify"
-npm test                      # 24 项，0 skipped
+npm test                      # 36 项，0 skipped
 ```
 
 | 文件 | 作用 |
@@ -221,9 +267,10 @@ npm test                      # 24 项，0 skipped
 | `src/gateway.js` | 那一次 HTTP 请求、错误分类、回答与来源的组装。 |
 | `src/parse.js` | `Sources:` 段落切分、markdown/裸 URL 提取、去重与标题。 |
 | `src/prompt.js` | 搜索指令（固定收尾形状是解析契约的一部分）。 |
-| `src/provider.js` | `WebSearchProvider` 实现：`available()` / `search()` / 日志记录。 |
+| `src/provider.js` | `WebSearchProvider` 实现：`available()` / `search()`（只读 seam，不写会话日志）。 |
 | `cordis.patch.yml` | bundle 层：改 `web.searchProvider` + 插入插件行。 |
 | `lib/client.js` | 浏览器半边：手写的加载器 bundle，注册设置卡片（settings.plugin.item）。 |
+| `tools/repair-session-events.mjs` | 扫描/修复被自定义会话事件写坏的会话日志（补 `ignorable: true`，带备份与自检）。 |
 | `install.mjs` | 装/卸到某个 profile。 |
 
 ## 标注为 DSH 插件

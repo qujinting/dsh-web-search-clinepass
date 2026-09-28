@@ -14,13 +14,6 @@ import { PROVIDER_ID } from './config.js';
 import { searchWithGateway } from './gateway.js';
 import { resolveTarget } from './route.js';
 
-/** Copy a value while dropping undefined fields, so the session log stays lossless JSON. */
-function definedEntries(source) {
-	const out = {};
-	for (const [key, value] of Object.entries(source)) if (value !== undefined && value !== null) out[key] = value;
-	return out;
-}
-
 /** Why a resolution attempt failed, in the user's terms. */
 function unavailableMessage(config) {
 	return 'clinepass web search cannot resolve a serviceable route: no model selection was available, or the selected route declares no OpenAI-compatible base URL and credential ref.'
@@ -76,38 +69,14 @@ export class CurrentModelSearchProvider {
 			signal,
 			maxSources: Math.min(configuredCap, requestedCap),
 		});
-		if (config.recordRequests !== false) this.record(query, target, result);
+		// No session event is written on purpose. DSH persists the session log
+		// fail-closed: the read path refuses any event type outside
+		// KNOWN_SESSION_EVENT_TYPES unless its envelope carries ignorable:true, and
+		// an out-of-repo plugin cannot set that marker because Session.append()
+		// accepts only surface metadata as its third argument. Appending a custom
+		// type here would make the session unloadable on its next resume, so a
+		// search stays a pure read of the seam and writes nothing durable.
 		return { content: result.content, sources: result.sources, truncated: false };
-	}
-
-	/**
-	 * Append one diagnostics event to the initiating session. Never fails a search.
-	 * @param query - the executed query.
-	 * @param target - the resolved route.
-	 * @param result - the gateway outcome.
-	 */
-	record(query, target, result) {
-		try {
-			const session = this.ctx.get('agents')?.currentInitiator?.()?.session;
-			if (session?.append === undefined) return;
-			session.append('web/clinepass-search-request', definedEntries({
-				provider: target.provider,
-				model: target.model,
-				endpoint: target.endpoint,
-				tool: target.tool,
-				selectionSource: target.source,
-				query,
-				durationMs: result.durationMs,
-				toolCalls: result.toolCalls,
-				executedSearches: result.executed,
-				cost: result.cost,
-				generationId: result.generationId,
-				finishReason: result.finishReason,
-				sourceCount: result.sources.length,
-			}));
-		} catch {
-			/* diagnostics only: a session that refuses the event must not fail the search */
-		}
 	}
 }
 

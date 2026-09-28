@@ -93,8 +93,6 @@ export const Config = z.object({
 	maxSources: z.number().step(1).min(1).default(10),
 	/** Extra guidance appended to the search instruction. */
 	instructions: z.string(),
-	/** Append one web/clinepass-search-request session event per search. */
-	recordRequests: z.boolean().default(true),
 });
 
 export default Config;
