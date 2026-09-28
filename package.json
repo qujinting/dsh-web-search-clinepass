@@ -1,0 +1,55 @@
+{
+  "name": "dsh-web-search-clinepass",
+  "version": "0.1.0",
+  "description": "DSH plugin: a ctx.web search provider that searches with the session's currently selected model and its gateway-native search tool (vercel:perplexity_search and friends), replacing the model-hardcoded built-in DeepSeek search provider.",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src/**/*.js",
+    "cordis.patch.yml",
+    "install.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/parse.test.mjs test/route.test.mjs",
+    "test:live": "node test/live-gateway.mjs"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "dsh",
+    "deepseek-harness",
+    "web-search",
+    "search-provider",
+    "clinepass",
+    "vercel-ai-gateway",
+    "openai-compatible",
+    "coding-agent",
+    "plugin"
+  ],
+  "author": "qujinting",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/qujinting/dsh-web-search-clinepass.git"
+  },
+  "homepage": "https://github.com/qujinting/dsh-web-search-clinepass#readme",
+  "bugs": {
+    "url": "https://github.com/qujinting/dsh-web-search-clinepass/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
