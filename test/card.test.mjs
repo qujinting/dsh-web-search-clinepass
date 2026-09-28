@@ -253,3 +253,31 @@ test('the card renders the baseline Tag, Switch, and chevron it was handed', asy
 	assert.match(expanded, /role="switch"/u, 'the boolean field is the baseline switch');
 	assert.match(expanded, /class="dswwsc-input"/u, 'the other controls carry the card field class');
 });
+
+test('the boolean field is a toggle row with the switch on the right', async (t) => {
+	if (React === undefined || renderToStaticMarkup === undefined) { t.skip('react-dom is not available on this machine'); return; }
+	const module = await loadClientBundle(React);
+	const scope = fakeScope({ section: { enabled: true } });
+	const markup = renderToStaticMarkup(React.createElement(module.__internals.WebSearchClinepassCard, { scope, defaultOpen: true }));
+	const start = markup.indexOf('dswwsc-toggleRow');
+	assert.ok(start > -1, 'the boolean field renders the toggle row the shipped cards use');
+	const row = markup.slice(start, markup.indexOf('</div>', start));
+	assert.match(row, /class="dswwsc-label"[^>]*>启用本 provider/u, 'the row names the field');
+	assert.ok(row.indexOf('role="switch"') > row.indexOf('dswwsc-label'), 'the switch sits at the right end of the row');
+	assert.match(row, /aria-checked="true"/u, 'the switch shows the staged value');
+});
+
+test('the search tool is a single-choice radio list, not a select', async (t) => {
+	if (React === undefined || renderToStaticMarkup === undefined) { t.skip('react-dom is not available on this machine'); return; }
+	const module = await loadClientBundle(React);
+	const scope = fakeScope({ section: { tool: 'vercel:exa_search' } });
+	const markup = renderToStaticMarkup(React.createElement(module.__internals.WebSearchClinepassCard, { scope, defaultOpen: true }));
+	assert.doesNotMatch(markup, /<select/u, 'no option list is hidden behind a control');
+	assert.match(markup, /role="radiogroup"/u);
+	const radios = [...markup.matchAll(/<input[^>]*type="radio"[^>]*>/gu)].map((match) => match[0]);
+	assert.equal(radios.length, module.__internals.TOOLS.length, 'every gateway tool is offered');
+	assert.equal(new Set(radios.map((radio) => /name="([^"]+)"/u.exec(radio)[1])).size, 1, 'one radio group');
+	const selected = radios.filter((radio) => radio.includes('checked'));
+	assert.equal(selected.length, 1, 'exactly one option is selected');
+	assert.match(selected[0], /value="vercel:exa_search"/u, 'the staged value is the selected option');
+});

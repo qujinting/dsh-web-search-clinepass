@@ -156,13 +156,14 @@ Sources:
 
 ## 已验证到哪一步
 
-- **单元测试** `npm test`：**39 项**。解析与路由解析 19 项（中文标点、markdown 链接、去重、截断、会话跟随、切换模型、协议不兼容、显式钉死、fallback），
+- **单元测试** `npm test`：**41 项**。解析与路由解析 19 项（中文标点、markdown 链接、去重、截断、会话跟随、切换模型、协议不兼容、显式钉死、fallback），
   搜索路径与修复工具 12 项（搜索不写会话事件、不可用路由不碰会话、schema 不再暴露写入开关、未支持事件识别、
   信封标记、帧结构保持、dry-run、活跃会话与 `session.lock` 保护、只扫描当前代际），
-  浏览器半边 8 项（槽位注册的 name/key/inject、等待 ledger 后再注册、写入计划器、默认值即清除覆盖、
-  默认折叠只渲染 header、命名空间缺失时的降级渲染、样式表只读主题 token 且全部命名空间化、Tag/Switch/chevron 走基座模块）。
-  其中 4 项渲染测试需要 `react-dom`，缺失时跳过（`npm test` 报 35 通过 + 4 跳过）；
-  用真 React 18.3.1 跑过全 **39 项（0 skipped）**。
+  浏览器半边 10 项（槽位注册的 name/key/inject、等待 ledger 后再注册、写入计划器、默认值即清除覆盖、
+  默认折叠只渲染 header、命名空间缺失时的降级渲染、样式表只读主题 token 且全部命名空间化、Tag/Switch/chevron 走基座模块、
+  布尔字段是「左标签 + 右开关」的 toggle row、搜索工具是单选 radio 列表且页面里没有 select）。
+  其中 6 项渲染测试需要 `react-dom`，缺失时跳过（`npm test` 报 35 通过 + 6 跳过）；
+  用真 React 18.3.1 跑过全 **41 项（0 skipped）**。
 - **真实 GUI 验收（与内置卡片逐项对齐）**：用本机 Chrome 走 CDP 直连正在运行的 `dsh web`（临时 profile + 用本机
   `client-connection/browser-session` 签名密钥铸的会话 cookie，密钥不出本机），把这张卡和内置「网页搜索」卡放在**同一页**逐项量：
   折叠态两张卡都是 **564×75**（header padding 14/16、gap 12、标题 15px/600、摘要 13px、chevron 14×14 且 `viewBox="0 0 14 14"`）；
@@ -171,6 +172,11 @@ Sources:
   bg = label-primary、文字 = bg-layer-3）**逐项相同**；「未保存」Tag 就是同一个基座组件，实测 49×19 / 11px / radius 999px 与内置一致；
   切到 `body[data-ds-dark-theme]` 后两张卡的 token 一起变（卡片 44,44,46 / 边框 67,69,74 / 控件 53,54,56 / 文字 249,250,251），
   控制台 **0 error、0 warning**；位置始终在内置四张卡片（终端 / Agent 循环 / Subagent / 网页搜索）之后。
+  两个控件的形态也在同一页对着内置 Subagent 卡量过：开关行 `justify-content:space-between` / `align-items:flex-start` /
+  `gap:16px`、开关外框 36×20 且贴右（右间距 0px），与内置的 toggle row 完全一致；搜索工具的单选组框
+  （border 1px rgba(0,0,0,.16)、radius 8、padding 10、gap 6、max-height 280、overflow auto）与内置 Subagent 卡
+  的选择列表 fieldset **逐项相同**，行内 padding 6 / radius 6 / gap 8 / 原生 radio 13×13 也一致；
+  6 个选项同一个 `name`、只有一个是 checked，页面里 `<select>` 数量为 0。
 - **真实 seam 集成** `node test/live-gateway.mjs`：用真实的 `WebRuntime`（`@deepseek-ai/dsh-web`）注册本供应商，
   按 `searchProvider: clinepass` 选中，向 `api.cline.bot` 实发一次搜索，断言来源非空且 `maxResults` 生效。
 - **真实 DSH 端到端**：临时 profile（`@deepseek-ai/dsh-base` + `@deepseek-ai/dsh-headless` + 本插件）跑一次真实任务，带回真实来源链接。
@@ -243,6 +249,10 @@ node tools/repair-session-events.mjs repair --session 80bad975-cea1-48af-b509-f2
 卡片可改的字段：`enabled`、`tool`（6 个网关搜索工具）、`maxSources`、`timeoutMs`、`maxTokens`、
 `provider` / `model`（钉死路由，可选）、`instructions`。改完点保存；字段恢复成默认值时写的是 `unset`
 （清除覆盖、重新继承），每个被覆盖的字段旁边有单独的「恢复默认」。
+
+控件形态跟内置卡片对齐：布尔字段是**左标签 + 右开关**的一行（内置 Subagent 卡 toggle row 的形态，开关贴最右）；
+`tool` 是**单选列表**而不是 `<select>` —— 6 个选项一次全看得见，分组框的边框 / 圆角 / padding / 行距照内置
+Subagent 卡的选择列表来（原生 radio，不做自定义绘制）。
 
 浏览器半边是**手写的** `lib/client.js`，按所有插件 bundle 的加载格式（`window.__ModuleLoader__.load({ id, factory })`）
 写死，所以本仓库没有构建步骤、也不依赖 npm 上的任何运行时包；它用基座模块表里的 `react` 与
