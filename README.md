@@ -175,6 +175,23 @@ Sources:
 - **供应商端工具是一次完整的模型回合**：延迟实测 8–15 秒，费用按上面那张表计。
 - 插件不修改任何原生包文件，卸载后原样恢复。
 
+## 设置页里的卡片（浏览器半边）
+
+这个插件是**双面**的：Host 半边注册 `web-search-clinepass` 设置命名空间，浏览器半边 `lib/client.js` 在
+`settings.plugin.item` 槽位下、以同一个 namespace 为 key 注册一张卡片。设置页渲染的是两个台账的**交集**
+（Host 已注册的 namespace ∩ 浏览器已注册卡片的 key），所以少了任何一半都看不到卡片：
+只装 Host 半边时，设置里不会出现它（这是 DSH 的设计，不是 bug）。
+
+卡片可改的字段：`enabled`、`tool`（6 个网关搜索工具）、`maxSources`、`timeoutMs`、`maxTokens`、
+`provider` / `model`（钉死路由，可选）、`instructions`。改完点保存；字段恢复成默认值时写的是 `unset`
+（清除覆盖、重新继承），每个被覆盖的字段旁边有单独的「恢复默认」。
+
+浏览器半边是**手写的** `lib/client.js`，按所有插件 bundle 的加载格式（`window.__ModuleLoader__.load({ id, factory })`）
+写死，所以本仓库没有构建步骤、也不依赖 npm 上的任何运行时包；它只用基座模块表里的 `react`，
+跨插件协作一律走 cordis 服务（`ctx.slots`、`ctx.settingsScope`）。
+
+> 装完或改了浏览器半边后**必须重启 dsh**：boot graph 在启动时组装，模块系统不会热替换已挂载包的清单。
+
 ## 开发
 
 ```powershell
@@ -195,6 +212,7 @@ node test/live-gateway.mjs    # 真实网关 + 真实 seam（会花一次搜索�
 | `src/prompt.js` | 搜索指令（固定收尾形状是解析契约的一部分）。 |
 | `src/provider.js` | `WebSearchProvider` 实现：`available()` / `search()` / 日志记录。 |
 | `cordis.patch.yml` | bundle 层：改 `web.searchProvider` + 插入插件行。 |
+| `lib/client.js` | 浏览器半边：手写的加载器 bundle，注册设置卡片（settings.plugin.item）。 |
 | `install.mjs` | 装/卸到某个 profile。 |
 
 ## 标注为 DSH 插件
@@ -204,6 +222,7 @@ node test/live-gateway.mjs    # 真实网关 + 真实 seam（会花一次搜索�
 | 层 | 位置 | 值 |
 |---|---|---|
 | 清单角色 | `package.json` → `dsh` | `{ "bundle": { "patch": "./cordis.patch.yml" } }` —— profile 启动器据此把这行当作 bundle 层加载。 |
+| 浏览器半边 | `package.json` → `dsh.client` | `{ "platform": "web" }` + 导出 `./client` —— client-modules 据此把它当浏览器插件挂进 boot graph，设置页的卡片就来自这里。 |
 | 包身份 | `package.json` → `name` / `version` / `author` / `license` | 具名且带版本，才会出现在 DSH 的插件清单（`dsh_plugin_packages` 请求字段）里。 |
 | 检索关键词 | `package.json` → `keywords` | `dsh-plugin`、`dsh`、`deepseek-harness`、`web-search`、`search-provider`、`clinepass`、`vercel-ai-gateway`、`openai-compatible`。 |
 | 仓库主题 | GitHub repo topics | `dsh-plugin`、`deepseek-harness`、`dsh`、`web-search`、`clinepass`、`vercel-ai-gateway`、`openai-compatible`。 |

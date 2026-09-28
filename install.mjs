@@ -123,6 +123,12 @@ async function verifyImport(dryRun) {
 		const module = await import(pathToFileURL(entry).href);
 		if (typeof module.apply !== 'function' || typeof module.name !== 'string') throw new Error('the module exports no apply()/name');
 		console.log('  import check   : ok (' + module.name + ', inject ' + JSON.stringify(module.inject) + ')');
+		const clientEntry = manifest.dsh?.client === undefined ? undefined : manifest.exports?.['./client'];
+		if (clientEntry !== undefined) {
+			const clientPath = join(packageDir, clientEntry);
+			if (!existsSync(clientPath)) throw new Error('the manifest declares dsh.client but ' + clientPath + ' is missing; the host would serve no browser half');
+			console.log('  browser half   : ok (' + clientEntry + ', ' + readFileSync(clientPath, 'utf8').length + ' bytes)');
+		}
 	} catch (error) {
 		throw new Error('installed, but the module cannot be imported from ' + packageDir + ': ' + (error instanceof Error ? error.message : String(error)) + '. Fix the dependency root above, then re-run this installer.');
 	}

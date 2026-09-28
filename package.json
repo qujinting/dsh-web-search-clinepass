@@ -6,10 +6,12 @@
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
+    "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
   "files": [
     "src/**/*.js",
+    "lib/client.js",
     "cordis.patch.yml",
     "install.mjs",
     "README.md",
@@ -18,13 +20,16 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
     }
   },
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test test/parse.test.mjs test/route.test.mjs",
+    "test": "node --test test/parse.test.mjs test/route.test.mjs test/card.test.mjs",
     "test:live": "node test/live-gateway.mjs"
   },
   "keywords": [
@@ -48,6 +53,9 @@
   "homepage": "https://github.com/qujinting/dsh-web-search-clinepass#readme",
   "bugs": {
     "url": "https://github.com/qujinting/dsh-web-search-clinepass/issues"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0"
   },
   "publishConfig": {
     "access": "public"
