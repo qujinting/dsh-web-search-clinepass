@@ -10,7 +10,7 @@
  * @module dsh-web-search-clinepass/provider
  */
 import { WebError } from '@deepseek-ai/dsh-web';
-import { PROVIDER_ID } from './config.js';
+import { PROVIDER_ID, normalizeConfig } from './config.js';
 import { searchWithGateway } from './gateway.js';
 import { resolveTarget } from './route.js';
 
@@ -54,7 +54,7 @@ export class CurrentModelSearchProvider {
 	 * @throws {WebError} with a stable code when the route, the credential, or the endpoint fails.
 	 */
 	async search(request, signal) {
-		const config = this.resolveConfig();
+		const config = normalizeConfig(this.resolveConfig());
 		const target = resolveTarget(this.ctx, config);
 		if (target === undefined) throw new WebError(unavailableMessage(config), 'WEB_PROVIDER_UNAVAILABLE');
 		const query = typeof request?.query === 'string' ? request.query.trim() : '';

@@ -43,11 +43,34 @@
 
 ## 安装
 
+按 dsh 版本选一条路。两条路装的是同一个 bundle，区别只在**谁改 profile 清单**，以及装完卡片出现在哪。
+
+### dsh 0.1.7 及以后（用内置插件管理器）
+
+```powershell
+# 从 npm
+dsh plugin --profile web add dsh-web-search-clinepass
+
+# 或从本地 checkout
+dsh plugin --profile web add file:D:/project/qujinting/dsh-plugin/web-search
+```
+
+- 插件管理器会跑 pnpm：把包装进 `<DSH_HOME>/profiles/web/node_modules`，并把 `dsh-web-search-clinepass`
+  追加进该 profile 的 `dsh.profile.bundles`（它自己会先备份 `package.json.bak-install-<时间戳>`）。
+- **重启 dsh 后生效**（bundle 清单在启动时组装）。可用 `dsh --profile web --dump-config` 先看拼装结果，不会启动服务。
+- 装完的配置页在 **左侧「插件」→ 已安装 → `dsh-web-search-clinepass` → 组件行 `web-search-clinepass` 的「配置」**。
+  0.1.7 把带配置的插件页搬到了插件管理器页；「设置 → 插件」现在只剩只读的插件列表。
+- 注意：`dsh plugin add file:` 是把代码**装进 pnpm store（硬链接）**，不是目录联接。改完本仓库代码要再跑一次
+  add 命令才生效（或者干脆用下面 0.1.5 那条 junction 路线做开发）。
+- 卸载：`dsh plugin --profile web remove dsh-web-search-clinepass`。
+
+### dsh 0.1.5
+
 ```powershell
 # 1) 装进 web profile（在插件目录里执行）
 node install.mjs --profile web
 
-# 2) 如果这份代码在预览模式，先看拼装结果（不会启动服务）
+# 2) 看拼装结果（不会启动服务）
 dsh --profile web --dump-config
 
 # 3) 重启 web 服务后生效
@@ -60,8 +83,8 @@ dsh web
 - 把 `dsh-web-search-clinepass` 追加到该 profile `package.json` 的 `dsh.profile.bundles`，并写一条 `file:` 依赖；
   改写前会自动备份 `package.json.bak-install-<时间戳>`。
 
-因为它是一个 bundle，`healProfileModuleFallback` 会在每次启动时自动维护这条链接；
-如果你以后在 profile 里跑了 `pnpm install` 发现链接被清掉，重跑一次 `node install.mjs --profile web` 即可。
+它建的是**目录联接**，所以改本仓库代码后刷新页面（浏览器半边）或重启（host 半边）即可，不用重装。
+配置页在 **设置 → 插件 → 插件配置**，设置写在 `<DSH_HOME>/settings.yaml` 的 `web-search-clinepass:` 段。
 
 手动安装（等价，供参考）：
 
@@ -73,12 +96,30 @@ New-Item -ItemType Junction -Path node_modules\dsh-web-search-clinepass -Target 
 
 ### 卸载
 
-```powershell
-node install.mjs --profile web --uninstall
-```
+0.1.7：`dsh plugin --profile web remove dsh-web-search-clinepass`
+0.1.5：`node install.mjs --profile web --uninstall`
 
-移除联接与 bundles 条目（同时会自动备份 package.json）。重启后 `web.searchProvider` 回到 `deepseek-official`，
+两者都会移除包与 bundles 条目（并备份 `package.json`）。重启后 `web.searchProvider` 回到 `deepseek-official`，
 内置行为完全恢复——插件不改动任何原生文件。
+
+### 一个包，两套 settings API
+
+dsh 0.1.7 重做了设置：插件的 Config 条目**就是**它的设置项，可编辑字段要标 `.volatile()`，写入落在 profile 的
+`cordis.patch.yml`；0.1.5 则是 `settings.installSection()` 注册一个 plugin-owned section，落在 `settings.yaml`。
+本插件用一个包同时支持两者：
+
+| | dsh 0.1.5 | dsh 0.1.7+ |
+|---|---|---|
+| host 半边 | `settings.installSection(ctx, 'web-search-clinepass', Config, …)` | `settings.configure({ auto: false }, ctx.fiber)` + 条目自身 Config |
+| 可编辑字段 | 整个 section 都进表单 | 只有标了 `.volatile()` 的字段（`src/config.js` 的 `editable()` 包装；老版 schemastery 没有这个方法就自动退化成普通字段） |
+| 读值 | section 解析结果（普通值） | volatile 引用，`.get()` 取当前值；`normalizeConfig()` 在每个边界统一摊平 |
+| 卡片槽位 | `settings.plugin.item` + `ctx.settingsScope` | `plugins.row.config`（key = `<包名>#<行 id>`）+ 页面传入的 `form`（`state` + `mutate`） |
+| 卡片位置 | 设置 → 插件 → 插件配置 | 左侧「插件」→ 已安装 → 该包 → 组件行「配置」 |
+| 设置落在 | `<DSH_HOME>/settings.yaml` | `<DSH_HOME>/profiles/<profile>/cordis.patch.yml` |
+
+分流全靠**服务探测**，没有版本号判断：host 半边看 settings 服务上有没有 `configure`（有就新、没有就旧），
+浏览器半边分别 `ctx.inject(['settingsScope'], …)` 与 `ctx.inject(['configForms'], …)`，两边的 `inject` 只会有
+一边被满足，所以只会注册一张卡片。
 
 ## 配置
 
@@ -190,16 +231,19 @@ Sources:
 
 ## 已验证到哪一步
 
-- **单元测试** `npm test`：**46 项**。解析与路由解析 19 项（中文标点、markdown 链接、去重、截断、会话跟随、切换模型、协议不兼容、显式钉死、fallback），
+- **单元测试** `npm test`：**56 项**。解析与路由解析 19 项（中文标点、markdown 链接、去重、截断、会话跟随、切换模型、协议不兼容、显式钉死、fallback），
   搜索路径与修复工具 15 项（搜索不写会话事件、不可用路由不碰会话、schema 不再暴露写入开关、请求体带 `tools[].config`、
   四个工具各自的 config 字段映射、未知 tool id 只发裸 id、system prompt 的搜索次数上限、未支持事件识别、
   信封标记、帧结构保持、dry-run、活跃会话与 `session.lock` 保护、只扫描当前代际），
-  浏览器半边 12 项（槽位注册的 name/key/inject、等待 ledger 后再注册、写入计划器、默认值即清除覆盖、
+  **host 半边 5 项**（0.1.7 走 `configure({auto:false})` 并读活引用、0.1.5 走 `installSection` 且优先用 section、
+  两套都没有时退回组合条目、`normalizeConfig` 摊平引用/透传普通值、可编辑字段标记为 volatile），
+  浏览器半边 17 项（两条注册路径各一项：0.1.7 的 `plugins.row.config` 键 `<包>#<行>`、0.1.5 的 `settings.plugin.item` 且等 ledger；
+  0.1.7 页面视图渲染字段、summary 视图不需要 form、未服务的条目渲染空、只读条目禁用全部按钮；写入计划器、默认值即清除覆盖、
   默认折叠只渲染 header、命名空间缺失时的降级渲染、样式表只读主题 token 且全部命名空间化、Tag/Switch/chevron 走基座模块、
   布尔字段是「左标签 + 右开关」的 toggle row、搜索工具是单选 radio 列表且页面里没有 select、只提供文档里的四个工具、
   搜索工具那一栏明说次数上限只是建议）。
-  其中 6 项渲染测试需要 `react-dom`，缺失时跳过（`npm test` 报 40 通过 + 6 跳过）；
-  用真 React 18.3.1 跑过全 **46 项（0 skipped）**。
+  其中 10 项渲染测试需要 `react-dom`，缺失时跳过（`npm test` 报 46 通过 + 10 跳过）；
+  用真 React 18.3.1 跑过全 **56 项（0 skipped）**。
 - **真实 GUI 验收（与内置卡片逐项对齐）**：用本机 Chrome 走 CDP 直连正在运行的 `dsh web`（临时 profile + 用本机
   `client-connection/browser-session` 签名密钥铸的会话 cookie，密钥不出本机），把这张卡和内置「网页搜索」卡放在**同一页**逐项量：
   折叠态两张卡都是 **564×75**（header padding 14/16、gap 12、标题 15px/600、摘要 13px、chevron 14×14 且 `viewBox="0 0 14 14"`）；
@@ -213,6 +257,13 @@ Sources:
   （border 1px rgba(0,0,0,.16)、radius 8、padding 10、gap 6、max-height 280、overflow auto）与内置 Subagent 卡
   的选择列表 fieldset **逐项相同**，行内 padding 6 / radius 6 / gap 8 / 原生 radio 13×13 也一致；
   4 个选项同一个 `name`、只有一个是 checked，页面里 `<select>` 数量为 0。
+- **真实 GUI 验收（dsh 0.1.7，隔离实例）**：另起一个 `DSH_HOME`（临时目录、临时 profile、3091 端口）跑真实的
+  `dsh 0.1.7-rc.2 web`，装上本插件后用 CDP 走完真实路径：左侧「插件」列出 `dsh-web-search-clinepass v0.3.0`（已安装 1 个）→
+  组件行 `web-search-clinepass` 的「配置」→ 页面渲染出本卡的 **8 个字段 / 4 个单选（默认项选中）/ 1 个开关行 /
+  6 个文本框 / 三颗底部按钮**，样式表已注入 `style[data-plugin-css]`；改为 `vercel:parallel_search` 点保存后显示
+  「已保存（1 项）。」，且 profile 的 `cordis.patch.yml` 里确实出现
+  `- id: web-search-clinepass\n  config:\n    tool: vercel:parallel_search`；
+  全过程 **0 error、0 warning**。（验证用的临时实例与临时 home 已删除，没有碰你正在跑的那个 dsh。）
 - **真实 seam 集成** `node test/live-gateway.mjs`：用真实的 `WebRuntime`（`@deepseek-ai/dsh-web`）注册本供应商，
   按 `searchProvider: clinepass` 选中，向 `api.cline.bot` 实发一次搜索，断言来源非空且 `maxResults` 生效。
 - **真实网关实测（搜索次数与 tools[].config）**：走插件自己的 `searchWithGateway` 打真实网关，
@@ -272,19 +323,21 @@ node tools/repair-session-events.mjs repair --session 80bad975-cea1-48af-b509-f2
 - 备份写在原文件旁边：`session.v3.jsonl.zstd.bak-<时间戳>`（harness 不会读取这个文件名，可随时删除）。
 - 历史代际（`session.jsonl.zstd`、`session.v2.jsonl.zstd` 等）不会被扫描——它们由 harness 自己的迁移链处理。
 
-## 设置页里的卡片（浏览器半边）
+## 卡片（浏览器半边）
 
-这个插件是**双面**的：Host 半边注册 `web-search-clinepass` 设置命名空间，浏览器半边 `lib/client.js` 在
-`settings.plugin.item` 槽位下、以同一个 namespace 为 key 注册一张卡片。设置页渲染的是两个台账的**交集**
-（Host 已注册的 namespace ∩ 浏览器已注册卡片的 key），所以少了任何一半都看不到卡片：
-只装 Host 半边时，设置里不会出现它（这是 DSH 的设计，不是 bug）。
+这个插件是**双面**的，而且两套设置模型各有一张卡：
 
-卡片跟内置卡片同形：`<li>` + 一个带 `aria-expanded` 的 header 按钮（标题 / 摘要 / 未保存标记 / chevron），
-**默认折叠**，保存成功后自动收起，保存失败则保持展开；折叠状态下 header 上会出现「未保存」。
+- **dsh 0.1.7**：`lib/client.js` 往 `plugins.row.config` 注册，key 是 `dsh-web-search-clinepass#web-search-clinepass`。
+  页面（插件管理器）自己画标题、图标、面包屑，并把该条目的 `form`（`state` + `mutate`）当 prop 传进来；
+  列表里还会调用 `summary` 视图要一句摘要，所以这张卡在**行未展开时**返回一句话。
+- **dsh 0.1.5**：往 `settings.plugin.item` 注册，key 是 `web-search-clinepass`，自己绑 `ctx.settingsScope`；
+  卡片是 `<li>` + 带 `aria-expanded` 的 header 按钮（标题 / 摘要 / 未保存标记 / chevron），**默认折叠**，
+  保存成功后自动收起，失败则保持展开。
 
-**排序规则**：设置页按 ledger 顺序渲染卡片，而本插件的 `apply` 比设置插件自己注册卡片更早，
+0.1.5 那张卡的**排序规则**：设置页按 ledger 顺序渲染，而本插件的 `apply` 比设置插件自己注册卡片更早，
 所以「立刻注册」会把这张卡顶到所有内置卡片之前。实现改为**等 ledger 里已经有卡片再入列** ——
 于是它排在本机加载时已有的那些配置之后，而不是钉死在最后（之后再注册的卡片依然排在它后面）。
+0.1.7 不涉及这个问题：位置由插件页面自己决定。
 
 卡片可改的字段：`enabled`、`tool`（文档里的 4 个网关搜索工具）、`maxSources`、`timeoutMs`、`maxTokens`、
 `provider` / `model`（钉死路由，可选）、`instructions`。改完点保存；字段恢复成默认值时写的是 `unset`
@@ -296,7 +349,8 @@ Subagent 卡的选择列表来（原生 radio，不做自定义绘制）。
 
 浏览器半边是**手写的** `lib/client.js`，按所有插件 bundle 的加载格式（`window.__ModuleLoader__.load({ id, factory })`）
 写死，所以本仓库没有构建步骤、也不依赖 npm 上的任何运行时包；它用基座模块表里的 `react` 与
-`@deepseek-ai/dsh-client-ui-primitives`，跨插件协作一律走 cordis 服务（`ctx.slots`、`ctx.settingsScope`）。
+`@deepseek-ai/dsh-client-ui-primitives`，跨插件协作一律走 cordis 服务或槽位（`ctx.slots`、0.1.5 的
+`ctx.settingsScope`、0.1.7 的 `ctx.configForms` 探测）。
 
 > 改了浏览器半边的**内容**只要刷新页面（必要时 Ctrl+Shift+R）就生效：bundle 由 Host 每次从磁盘读，
 > 实测改完在已运行的 `dsh web` 里直接看到新样式与新文案。只有**增删 bundle 本身**

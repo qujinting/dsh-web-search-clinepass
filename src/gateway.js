@@ -14,6 +14,7 @@ import { WebError } from '@deepseek-ai/dsh-web';
 import { buildSearchInstruction, SEARCH_SYSTEM_PROMPT } from './prompt.js';
 import { parseSearchAnswer, cleanUrl } from './parse.js';
 import { resolveApiKey } from './route.js';
+import { normalizeConfig } from './config.js';
 
 /** Attribution header sent on every request. */
 const USER_AGENT = 'dsh-web-search-clinepass/0.1.0';
@@ -131,7 +132,10 @@ export function toolEntry(tool, query, maxResults) {
  * @throws {WebError} with a stable code for every failure class.
  */
 export async function searchWithGateway(options) {
-	const { ctx, config, target, query, signal } = options;
+	const { ctx, target, query, signal } = options;
+	// The same boundary the route resolver uses: editable fields are live
+	// references on 0.1.7 and plain values on 0.1.5.
+	const config = normalizeConfig(options.config);
 	const maxSources = Number.isInteger(options.maxSources) && options.maxSources > 0 ? options.maxSources : 10;
 	const timeoutMs = Number.isInteger(config.timeoutMs) && config.timeoutMs > 0 ? config.timeoutMs : 90000;
 	const apiKey = await resolveApiKey(ctx, target);

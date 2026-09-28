@@ -1,7 +1,7 @@
 {
   "name": "dsh-web-search-clinepass",
-  "version": "0.2.0",
-  "description": "DSH plugin: a ctx.web search provider that searches with the session's currently selected model and its gateway-native search tool (vercel:perplexity_search and friends), replacing the model-hardcoded built-in DeepSeek search provider.",
+  "version": "0.3.0",
+  "description": "DSH plugin (dsh 0.1.5 and 0.1.7+): a ctx.web search provider that searches with the session's currently selected model and its gateway-native search tool (vercel:perplexity_search and friends), replacing the model-hardcoded built-in DeepSeek search provider.",
   "type": "module",
   "main": "src/index.js",
   "exports": {
@@ -30,7 +30,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test test/parse.test.mjs test/route.test.mjs test/card.test.mjs test/provider.test.mjs test/repair-session-events.test.mjs",
+    "test": "node --test test/parse.test.mjs test/route.test.mjs test/card.test.mjs test/host.test.mjs test/provider.test.mjs test/repair-session-events.test.mjs",
     "test:live": "node test/live-gateway.mjs",
     "repair-sessions": "node tools/repair-session-events.mjs scan",
     "repair-sessions:apply": "node tools/repair-session-events.mjs repair --apply"
@@ -59,6 +59,11 @@
   },
   "peerDependencies": {
     "react": "^18.2.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
   },
   "publishConfig": {
     "access": "public"

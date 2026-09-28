@@ -130,32 +130,74 @@ function fakeScope(options = {}) {
 	};
 }
 
-test('the bundle registers the card under the settings namespace key', async () => {
-	const module = await loadClientBundle({});
-	assert.equal(typeof module.apply, 'function');
-	assert.deepEqual(module.inject, ['slots', 'settingsScope']);
-	const bound = [];
-	const registered = [];
-	let ledgerReads = 0;
-	const ctx = {
-		settingsScope: { bind: (spec) => { bound.push(spec); return fakeScope(); } },
-		slots: {
-			// The ledger is empty for the first reads, then carries the deployment's
-			// own cards: registration must wait for it, so this card ranks last.
-			entries: (name) => {
-				assert.equal(name, 'settings.plugin.item');
-				ledgerReads += 1;
-				return ledgerReads < 3 ? [] : [{ options: { key: 'shell' } }, { options: { key: 'web-search-deepseek' } }];
-			},
-			register: (entry, component) => {
-				registered.push({ entry, component, ledgerReads });
-				return () => {};
-			},
+/**
+ * A dsh 0.1.5 browser context: the settings client provides settingsScope and the
+ * plugins tab declares settings.plugin.item.
+ * @param bound - receives the bound scope specs.
+ * @param registered - receives the slot registrations.
+ * @param ledger - ledger read counter the test asserts on.
+ */
+function legacyContext(bound, registered, ledger) {
+	const slots = {
+		// The ledger is empty for the first reads, then carries the deployment's own
+		// cards: registration must wait for it, so this card ranks after them.
+		entries: (name) => {
+			assert.equal(name, 'settings.plugin.item');
+			ledger.reads += 1;
+			return ledger.reads < 3 ? [] : [{ options: { key: 'shell' } }, { options: { key: 'web-search-deepseek' } }];
+		},
+		register: (entry, component) => {
+			registered.push({ entry, component, ledgerReads: ledger.reads });
+			return () => {};
 		},
 	};
-	await module.apply(ctx);
+	const settingsScope = { bind: (spec) => { bound.push(spec); return fakeScope(); } };
+	return {
+		slots,
+		settingsScope,
+		inject: (services, run) => { if (services.includes('settingsScope')) run({ slots, settingsScope }); },
+	};
+}
+
+/**
+ * A dsh 0.1.7 browser context: the settings client provides configForms and the
+ * plugin manager page declares plugins.row.config.
+ * @param registered - receives the slot registrations.
+ */
+function modernContext(registered) {
+	const slots = {
+		entries: () => [],
+		inject: (name, run) => { assert.equal(name, 'plugins.row.config'); run(); },
+		register: (entry, component) => { registered.push({ entry, component }); return () => {}; },
+	};
+	return {
+		slots,
+		inject: (services, run) => { if (services.includes('configForms')) run({ slots }); },
+	};
+}
+
+test('dsh 0.1.7: the page hands the form over, so the row configuration just registers', async () => {
+	const module = await loadClientBundle({});
+	assert.equal(typeof module.apply, 'function');
+	assert.deepEqual(module.inject, ['slots'], 'the form arrives as a prop, so no settings service is injected');
+	const registered = [];
+	module.apply(modernContext(registered));
+	assert.equal(registered.length, 1, 'one registration, and none for the 0.1.5 tab');
+	assert.equal(registered[0].entry.name, 'plugins.row.config');
+	assert.equal(registered[0].entry.key, 'dsh-web-search-clinepass#web-search-clinepass', 'keyed by bundle and row, the way the page looks it up');
+	assert.equal(typeof registered[0].component, 'function');
+});
+
+test('dsh 0.1.5: the card binds the section scope and waits for the deployment cards', async () => {
+	const module = await loadClientBundle({});
+	const bound = [];
+	const registered = [];
+	const ledger = { reads: 0 };
+	module.apply(legacyContext(bound, registered, ledger));
+	assert.equal(registered.length, 0, 'the ledger is empty, so nothing registers yet');
+	await new Promise((resolve) => { setTimeout(resolve, 60); });
 	assert.deepEqual(bound, [{ namespace: 'web-search-clinepass' }]);
-	assert.equal(registered.length, 1);
+	assert.equal(registered.length, 1, 'one registration, and none for the 0.1.7 page');
 	assert.equal(registered[0].entry.name, 'settings.plugin.item');
 	assert.equal(registered[0].entry.key, 'web-search-clinepass');
 	assert.equal(registered[0].entry.inject().scope.snapshot.revision, 7);
@@ -300,4 +342,68 @@ test('the search tool is a single-choice radio list, not a select', async (t) =>
 	const selected = radios.filter((radio) => radio.includes('checked'));
 	assert.equal(selected.length, 1, 'exactly one option is selected');
 	assert.match(selected[0], /value="vercel:exa_search"/u, 'the staged value is the selected option');
+});
+
+/**
+ * The form the 0.1.7 plugin manager page hands a row's configuration entry.
+ * @param section - accepted values the page read.
+ * @param user - raw user layer, whose field presence marks an override.
+ * @param options - snapshot status, writability, and the mutate action to observe.
+ */
+function fakeForm(section, user = {}, options = {}) {
+	return {
+		state: {
+			status: options.status ?? 'ready',
+			value: section,
+			base: {},
+			user,
+			revision: options.revision ?? 11,
+			writable: options.writable ?? true,
+			mode: 'host',
+		},
+		mutate: (ops, revision) => {
+			if (options.mutate !== undefined) return options.mutate(ops, revision);
+			return Promise.resolve(true);
+		},
+	};
+}
+
+test('dsh 0.1.7: the page view renders the fields and leaves the chrome to the page', async (t) => {
+	if (React === undefined || renderToStaticMarkup === undefined) { t.skip('react-dom is not available on this machine'); return; }
+	const module = await loadClientBundle(React);
+	const form = fakeForm({ tool: 'vercel:exa_search', enabled: true }, { tool: 'vercel:exa_search' });
+	const markup = renderToStaticMarkup(React.createElement(module.__internals.ModernCard, { view: 'page', form }));
+	assert.match(markup, /role="radiogroup"/u, 'the tool list is offered');
+	assert.match(markup, /role="switch"/u, 'the boolean field is the baseline switch');
+	assert.match(markup, /web-search-clinepass-maxTokens/u, 'every field renders');
+	assert.doesNotMatch(markup, /dswwsc-header/u, 'the plugin page draws the title and crumb, not this card');
+	assert.doesNotMatch(markup, /aria-expanded/u, 'nothing is collapsed on the page the user explicitly opened');
+	assert.match(markup, /已保存|保存/u);
+});
+
+test('dsh 0.1.7: the listed row asks for a summary and gets one without a form', async (t) => {
+	if (React === undefined || renderToStaticMarkup === undefined) { t.skip('react-dom is not available on this machine'); return; }
+	const module = await loadClientBundle(React);
+	const markup = renderToStaticMarkup(React.createElement(module.__internals.ModernCard, { view: 'summary' }));
+	assert.match(markup, /用当前会话选中的模型/u, 'the row describes itself while collapsed');
+	assert.doesNotMatch(markup, /radiogroup/u);
+});
+
+test('dsh 0.1.7: an unserved entry renders nothing, and a loading one says so', async (t) => {
+	if (React === undefined || renderToStaticMarkup === undefined) { t.skip('react-dom is not available on this machine'); return; }
+	const module = await loadClientBundle(React);
+	assert.equal(renderToStaticMarkup(React.createElement(module.__internals.ModernCard, { view: 'page' })), '', 'no form means the Host serves no such entry');
+	const loading = renderToStaticMarkup(React.createElement(module.__internals.ModernCard, { view: 'page', form: fakeForm(undefined, {}, { status: 'loading' }) }));
+	assert.match(loading, /正在读取配置/u);
+	const unavailable = renderToStaticMarkup(React.createElement(module.__internals.ModernCard, { view: 'page', form: fakeForm(undefined, {}, { status: 'unavailable' }) }));
+	assert.match(unavailable, /本部署不对外暴露/u);
+});
+
+test('dsh 0.1.7: a read-only entry disables every control', async (t) => {
+	if (React === undefined || renderToStaticMarkup === undefined) { t.skip('react-dom is not available on this machine'); return; }
+	const module = await loadClientBundle(React);
+	const form = fakeForm({ tool: 'vercel:parallel_search' }, {}, { writable: false });
+	const markup = renderToStaticMarkup(React.createElement(module.__internals.ModernCard, { view: 'page', form }));
+	assert.match(markup, /只读：本部署不允许写这个命名空间/u);
+	assert.doesNotMatch(markup, /<button(?![^>]*disabled)/u, 'every button is disabled while the document refuses writes');
 });

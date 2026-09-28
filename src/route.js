@@ -15,7 +15,7 @@
  */
 import { credentialRef } from '@deepseek-ai/dsh-credentials';
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment';
-import { DEFAULT_TOOL } from './config.js';
+import { DEFAULT_TOOL, normalizeConfig } from './config.js';
 
 /** Wire protocols that speak OpenAI chat completions, the only shape this provider sends. */
 const OPENAI_CHAT_APIS = new Set([
@@ -151,18 +151,21 @@ function targetFor(ctx, config, selection) {
  * @returns the target to search with, or undefined when nothing is serviceable.
  */
 export function resolveTarget(ctx, config) {
-	if (config?.enabled === false) return undefined;
+	// One boundary for the two config shapes: 0.1.7 parses editable fields into
+	// live references, 0.1.5 leaves them plain, and a plain object passes through.
+	const section = normalizeConfig(config);
+	if (section.enabled === false) return undefined;
 	const selected = sessionModelSelection(ctx);
-	const pinned = firstText(config?.provider, config?.model) !== undefined;
-	const provider = firstText(config?.provider, selected?.provider);
-	const model = firstText(config?.model, selected?.model);
+	const pinned = firstText(section.provider, section.model) !== undefined;
+	const provider = firstText(section.provider, selected?.provider);
+	const model = firstText(section.model, selected?.model);
 	if (provider !== undefined && model !== undefined) {
-		const target = targetFor(ctx, config, { provider, model, source: pinned ? 'configuration' : (selected?.source ?? 'session') });
+		const target = targetFor(ctx, section, { provider, model, source: pinned ? 'configuration' : (selected?.source ?? 'session') });
 		if (target !== undefined) return target;
 	}
-	const fallback = config?.fallback;
+	const fallback = section.fallback;
 	if (typeof fallback?.provider === 'string' && typeof fallback?.model === 'string') {
-		return targetFor(ctx, config, { provider: fallback.provider, model: fallback.model, source: 'configured fallback' });
+		return targetFor(ctx, section, { provider: fallback.provider, model: fallback.model, source: 'configured fallback' });
 	}
 	return undefined;
 }
