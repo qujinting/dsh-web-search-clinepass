@@ -156,11 +156,16 @@ Sources:
 
 ## 已验证到哪一步
 
-- **单元测试** `npm test`：36 项。解析与路由解析 19 项（中文标点、markdown 链接、去重、截断、会话跟随、切换模型、协议不兼容、显式钉死、fallback），
+- **单元测试** `npm test`：**37 项**。解析与路由解析 19 项（中文标点、markdown 链接、去重、截断、会话跟随、切换模型、协议不兼容、显式钉死、fallback），
   搜索路径与修复工具 12 项（搜索不写会话事件、不可用路由不碰会话、schema 不再暴露写入开关、未支持事件识别、
   信封标记、帧结构保持、dry-run、活跃会话与 `session.lock` 保护、只扫描当前代际），
-  浏览器半边 5 项（槽位注册的 name/key/inject、写入计划器、默认值即清除覆盖、卡片静态渲染、命名空间缺失时的降级渲染）。
-  其中 2 项渲染测试需要 `react-dom`，缺失时跳过；用真 React 18.3.1 跑过全 36 项（0 skipped）。
+  浏览器半边 6 项（槽位注册的 name/key/inject、等待 ledger 后再注册、写入计划器、默认值即清除覆盖、
+  默认折叠只渲染 header、命名空间缺失时的降级渲染）。
+  其中 3 项渲染测试需要 `react-dom`，缺失时跳过（`npm test` 报 34 通过 + 3 跳过）；
+  用真 React 18.3.1 跑过全 **37 项（0 skipped）**。
+- **真实 GUI 验收**：用本机 Chrome 走 CDP 直连正在运行的 `dsh web`（临时 profile + 用本机
+  `client-connection/browser-session` 签名密钥铸的会话 cookie，密钥不出本机），实测卡片：折叠态高 74px、`aria-expanded=false`；
+  展开后 `aria-expanded=true`、8 个字段齐全；位置在内置四张卡片（终端 / Agent 循环 / Subagent / 网页搜索）之后。
 - **真实 seam 集成** `node test/live-gateway.mjs`：用真实的 `WebRuntime`（`@deepseek-ai/dsh-web`）注册本供应商，
   按 `searchProvider: clinepass` 选中，向 `api.cline.bot` 实发一次搜索，断言来源非空且 `maxResults` 生效。
 - **真实 DSH 端到端**：临时 profile（`@deepseek-ai/dsh-base` + `@deepseek-ai/dsh-headless` + 本插件）跑一次真实任务，带回真实来源链接。
