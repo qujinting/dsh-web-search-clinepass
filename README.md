@@ -208,7 +208,8 @@ node test/live-gateway.mjs    # 真实网关 + 真实 seam（会花一次搜索�
 | 检索关键词 | `package.json` → `keywords` | `dsh-plugin`、`dsh`、`deepseek-harness`、`web-search`、`search-provider`、`clinepass`、`vercel-ai-gateway`、`openai-compatible`。 |
 | 仓库主题 | GitHub repo topics | `dsh-plugin`、`deepseek-harness`、`dsh`、`web-search`、`clinepass`、`vercel-ai-gateway`、`openai-compatible`。 |
 
-GitHub 的 topic 与 description 需要仓库权限，`gh` 未安装时用 API 设置：
+以上四项本仓库都已应用（topics 与 description 已通过 GitHub API 写入）。
+需要在新 fork / 新仓库上重做时，GitHub 的 topic 与 description 需要仓库权限，`gh` 未安装时用 API 设置：
 
 ```powershell
 $token = "<你的 GitHub PAT，需要 repo 权限>"
