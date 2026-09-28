@@ -9,7 +9,7 @@
  * only touches React when it renders - so they run anywhere.
  */
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -20,16 +20,26 @@ const dshHome = process.env.DSH_HOME ?? join(homedir(), '.dsh');
 /** Bumped per load so each evaluation gets its own module URL. */
 let loadCount = 0;
 
-/** Resolve one bare module from the first anchor that can answer. */
+/**
+ * Resolve one bare module from the first anchor that can answer.
+ * @param specifier - the bare module to resolve.
+ * @returns the module, or undefined when no anchor can answer.
+ */
 function resolveFromHarness(specifier) {
+	const external = process.env.DSH_CARD_TEST_MODULES;
 	const anchors = [
+		// DSH_CARD_TEST_MODULES lets a developer point these tests at any module
+		// directory that carries react plus react-dom (for example a scratch
+		// `npm install --prefix <dir> react react-dom`).
+		...(typeof external === 'string' && external.length > 0 ? [join(external, 'resolve-from.js')] : []),
 		join(dshHome, 'profiles', 'web', 'package.json'),
 		join(dshHome, 'profiles', 'package.json'),
 		join(process.cwd(), 'package.json'),
 	];
 	for (const anchor of anchors) {
-		if (!existsSync(anchor)) continue;
 		try {
+			// createRequire only needs a base path, so an anchor need not exist:
+			// CJS resolution walks up from it either way.
 			return createRequire(anchor)(specifier);
 		} catch {
 			/* try the next anchor */

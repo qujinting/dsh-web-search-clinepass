@@ -155,7 +155,9 @@ Sources:
 
 ## 已验证到哪一步
 
-- **单元测试** `npm test`：19 项，覆盖解析（中文标点、markdown 链接、去重、截断）与路由解析（会话跟随、切换模型、协议不兼容、显式钉死、fallback）。
+- **单元测试** `npm test`：24 项。解析与路由解析 19 项（中文标点、markdown 链接、去重、截断、会话跟随、切换模型、协议不兼容、显式钉死、fallback），
+  浏览器半边 5 项（槽位注册的 name/key/inject、写入计划器、默认值即清除覆盖、卡片静态渲染、命名空间缺失时的降级渲染）。
+  其中 2 项渲染测试需要 `react-dom`，缺失时跳过；用真 React 18.3.1 跑过全 24 项（0 skipped）。
 - **真实 seam 集成** `node test/live-gateway.mjs`：用真实的 `WebRuntime`（`@deepseek-ai/dsh-web`）注册本供应商，
   按 `searchProvider: clinepass` 选中，向 `api.cline.bot` 实发一次搜索，断言来源非空且 `maxResults` 生效。
 - **真实 DSH 端到端**：临时 profile（`@deepseek-ai/dsh-base` + `@deepseek-ai/dsh-headless` + 本插件）跑一次真实任务，
@@ -200,6 +202,15 @@ New-Item -ItemType Junction -Path node_modules -Target $env:USERPROFILE\.dsh\pro
 
 npm test                      # 单元测试（不花钱）
 node test/live-gateway.mjs    # 真实网关 + 真实 seam（会花一次搜索的钱）
+```
+
+卡片的两条静态渲染测试需要 `react-dom`（DSH 的模块闭包里没有它），否则会优雅跳过。
+想跑全 24 项就临时装一份并指过去（不写进本仓库）：
+
+```powershell
+npm install --prefix "$env:TEMP\dsh-card-verify" react@18.3.1 react-dom@18.3.1
+$env:DSH_CARD_TEST_MODULES="$env:TEMP\dsh-card-verify"
+npm test                      # 24 项，0 skipped
 ```
 
 | 文件 | 作用 |
