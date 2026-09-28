@@ -264,7 +264,12 @@ export function repairSessionFile(file, options = {}) {
 			return report;
 		}
 		const idleMs = Date.now() - fs.statSync(file).mtimeMs;
-		if (idleMs < activeWindowMs) {
+		// A zero window means "no window" and must disable the check outright: a
+		// file written a moment ago can carry an mtime a fraction of a millisecond
+		// ahead of Date.now() (filesystem timestamp granularity), and that negative
+		// idle must not refuse an explicitly windowless repair. A positive window
+		// still refuses on negative idle, which is the just-written case it guards.
+		if (activeWindowMs > 0 && idleMs < activeWindowMs) {
 			report.skipped = 'written ' + String(Math.round(idleMs / 1000)) + 's ago (the session may still be open); close it and rerun, or pass --force to repair anyway';
 			return report;
 		}
