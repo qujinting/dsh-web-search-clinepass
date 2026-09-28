@@ -87,7 +87,7 @@ node install.mjs --profile web --uninstall
 | 字段 | 默认 | 说明 |
 |---|---|---|
 | `enabled` | `true` | 关掉后本供应商报告为不可用。 |
-| `tool` | `vercel:perplexity_search` | 发给网关的供应商端搜索工具 id。 |
+| `tool` | `vercel:perplexity_search` | 发给网关的供应商端搜索工具 id（4 选 1）。按每次检索计费；提示词里的搜索次数上限只是**建议**，本格式没有硬上限，模型可能检索更多次。 |
 | `provider` / `model` | 空（跟随会话） | 钉死路由与模型，不再跟随 UI 选择。 |
 | `baseURL` / `api` / `apiKeyEnv` / `apiKey` | 空 | 钉死端点与凭据。 |
 | `headers` | 空 | 额外请求头，合并优先级：`llm-pi-ai` < `routes[provider]` < 本节。 |
@@ -190,15 +190,16 @@ Sources:
 
 ## 已验证到哪一步
 
-- **单元测试** `npm test`：**45 项**。解析与路由解析 19 项（中文标点、markdown 链接、去重、截断、会话跟随、切换模型、协议不兼容、显式钉死、fallback），
+- **单元测试** `npm test`：**46 项**。解析与路由解析 19 项（中文标点、markdown 链接、去重、截断、会话跟随、切换模型、协议不兼容、显式钉死、fallback），
   搜索路径与修复工具 15 项（搜索不写会话事件、不可用路由不碰会话、schema 不再暴露写入开关、请求体带 `tools[].config`、
   四个工具各自的 config 字段映射、未知 tool id 只发裸 id、system prompt 的搜索次数上限、未支持事件识别、
   信封标记、帧结构保持、dry-run、活跃会话与 `session.lock` 保护、只扫描当前代际），
-  浏览器半边 11 项（槽位注册的 name/key/inject、等待 ledger 后再注册、写入计划器、默认值即清除覆盖、
+  浏览器半边 12 项（槽位注册的 name/key/inject、等待 ledger 后再注册、写入计划器、默认值即清除覆盖、
   默认折叠只渲染 header、命名空间缺失时的降级渲染、样式表只读主题 token 且全部命名空间化、Tag/Switch/chevron 走基座模块、
-  布尔字段是「左标签 + 右开关」的 toggle row、搜索工具是单选 radio 列表且页面里没有 select、只提供文档里的四个工具）。
-  其中 6 项渲染测试需要 `react-dom`，缺失时跳过（`npm test` 报 39 通过 + 6 跳过）；
-  用真 React 18.3.1 跑过全 **45 项（0 skipped）**。
+  布尔字段是「左标签 + 右开关」的 toggle row、搜索工具是单选 radio 列表且页面里没有 select、只提供文档里的四个工具、
+  搜索工具那一栏明说次数上限只是建议）。
+  其中 6 项渲染测试需要 `react-dom`，缺失时跳过（`npm test` 报 40 通过 + 6 跳过）；
+  用真 React 18.3.1 跑过全 **46 项（0 skipped）**。
 - **真实 GUI 验收（与内置卡片逐项对齐）**：用本机 Chrome 走 CDP 直连正在运行的 `dsh web`（临时 profile + 用本机
   `client-connection/browser-session` 签名密钥铸的会话 cookie，密钥不出本机），把这张卡和内置「网页搜索」卡放在**同一页**逐项量：
   折叠态两张卡都是 **564×75**（header padding 14/16、gap 12、标题 15px/600、摘要 13px、chevron 14×14 且 `viewBox="0 0 14 14"`）；

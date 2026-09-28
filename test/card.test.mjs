@@ -198,6 +198,14 @@ test('the card offers exactly the four tools this API format documents', async (
 	assert.equal(module.__internals.FIELDS.find((field) => field.key === 'maxTokens').def, 8192);
 });
 
+test('the card discloses that the search-count cap is only advice', async () => {
+	const module = await loadClientBundle({});
+	const hint = module.__internals.FIELDS.find((field) => field.key === 'tool').hint;
+	assert.match(hint, /只是建议/u, 'a user cannot see the system prompt, so the setting has to say it');
+	assert.match(hint, /没有硬上限/u);
+	assert.match(hint, /费用随次数累加/u);
+});
+
 test('a section that already matches the defaults writes nothing', async () => {
 	const module = await loadClientBundle({});
 	const { buildOps, readDraft } = module.__internals;
