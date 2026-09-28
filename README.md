@@ -156,16 +156,21 @@ Sources:
 
 ## 已验证到哪一步
 
-- **单元测试** `npm test`：**37 项**。解析与路由解析 19 项（中文标点、markdown 链接、去重、截断、会话跟随、切换模型、协议不兼容、显式钉死、fallback），
+- **单元测试** `npm test`：**39 项**。解析与路由解析 19 项（中文标点、markdown 链接、去重、截断、会话跟随、切换模型、协议不兼容、显式钉死、fallback），
   搜索路径与修复工具 12 项（搜索不写会话事件、不可用路由不碰会话、schema 不再暴露写入开关、未支持事件识别、
   信封标记、帧结构保持、dry-run、活跃会话与 `session.lock` 保护、只扫描当前代际），
-  浏览器半边 6 项（槽位注册的 name/key/inject、等待 ledger 后再注册、写入计划器、默认值即清除覆盖、
-  默认折叠只渲染 header、命名空间缺失时的降级渲染）。
-  其中 3 项渲染测试需要 `react-dom`，缺失时跳过（`npm test` 报 34 通过 + 3 跳过）；
-  用真 React 18.3.1 跑过全 **37 项（0 skipped）**。
-- **真实 GUI 验收**：用本机 Chrome 走 CDP 直连正在运行的 `dsh web`（临时 profile + 用本机
-  `client-connection/browser-session` 签名密钥铸的会话 cookie，密钥不出本机），实测卡片：折叠态高 74px、`aria-expanded=false`；
-  展开后 `aria-expanded=true`、8 个字段齐全；位置在内置四张卡片（终端 / Agent 循环 / Subagent / 网页搜索）之后。
+  浏览器半边 8 项（槽位注册的 name/key/inject、等待 ledger 后再注册、写入计划器、默认值即清除覆盖、
+  默认折叠只渲染 header、命名空间缺失时的降级渲染、样式表只读主题 token 且全部命名空间化、Tag/Switch/chevron 走基座模块）。
+  其中 4 项渲染测试需要 `react-dom`，缺失时跳过（`npm test` 报 35 通过 + 4 跳过）；
+  用真 React 18.3.1 跑过全 **39 项（0 skipped）**。
+- **真实 GUI 验收（与内置卡片逐项对齐）**：用本机 Chrome 走 CDP 直连正在运行的 `dsh web`（临时 profile + 用本机
+  `client-connection/browser-session` 签名密钥铸的会话 cookie，密钥不出本机），把这张卡和内置「网页搜索」卡放在**同一页**逐项量：
+  折叠态两张卡都是 **564×75**（header padding 14/16、gap 12、标题 15px/600、摘要 13px、chevron 14×14 且 `viewBox="0 0 14 14"`）；
+  展开态 body 的 border-top / margin 16 / padding-bottom 8、字段 padding 12、label 13px/500、hint 12px、
+  控件 530×36（radius 8 / border 1px / padding 12 / font 13）、footer 与保存按钮（font 13、padding 5/14、
+  bg = label-primary、文字 = bg-layer-3）**逐项相同**；「未保存」Tag 就是同一个基座组件，实测 49×19 / 11px / radius 999px 与内置一致；
+  切到 `body[data-ds-dark-theme]` 后两张卡的 token 一起变（卡片 44,44,46 / 边框 67,69,74 / 控件 53,54,56 / 文字 249,250,251），
+  控制台 **0 error、0 warning**；位置始终在内置四张卡片（终端 / Agent 循环 / Subagent / 网页搜索）之后。
 - **真实 seam 集成** `node test/live-gateway.mjs`：用真实的 `WebRuntime`（`@deepseek-ai/dsh-web`）注册本供应商，
   按 `searchProvider: clinepass` 选中，向 `api.cline.bot` 实发一次搜索，断言来源非空且 `maxResults` 生效。
 - **真实 DSH 端到端**：临时 profile（`@deepseek-ai/dsh-base` + `@deepseek-ai/dsh-headless` + 本插件）跑一次真实任务，带回真实来源链接。
@@ -240,10 +245,41 @@ node tools/repair-session-events.mjs repair --session 80bad975-cea1-48af-b509-f2
 （清除覆盖、重新继承），每个被覆盖的字段旁边有单独的「恢复默认」。
 
 浏览器半边是**手写的** `lib/client.js`，按所有插件 bundle 的加载格式（`window.__ModuleLoader__.load({ id, factory })`）
-写死，所以本仓库没有构建步骤、也不依赖 npm 上的任何运行时包；它只用基座模块表里的 `react`，
-跨插件协作一律走 cordis 服务（`ctx.slots`、`ctx.settingsScope`）。
+写死，所以本仓库没有构建步骤、也不依赖 npm 上的任何运行时包；它用基座模块表里的 `react` 与
+`@deepseek-ai/dsh-client-ui-primitives`，跨插件协作一律走 cordis 服务（`ctx.slots`、`ctx.settingsScope`）。
 
-> 装完或改了浏览器半边后**必须重启 dsh**：boot graph 在启动时组装，模块系统不会热替换已挂载包的清单。
+> 改了浏览器半边的**内容**只要刷新页面（必要时 Ctrl+Shift+R）就生效：bundle 由 Host 每次从磁盘读，
+> 实测改完在已运行的 `dsh web` 里直接看到新样式与新文案。只有**增删 bundle 本身**
+> （`dsh.profile.bundles` / profile `package.json` 的组合变化）才需要重启。
+
+### 卡片的外观来自宿主，不是自己画的
+
+DSH 里**没有**「声明式配置卡」这种接口。slot 契约写得很直白：*a card draws its own internals; the tab only
+decides which namespaces to dispatch and stacks what comes back*；一个 Host 已服务、但没有卡片认领的
+namespace **什么都不渲染**（`tab-store` 的原话：*A served namespace no card claims renders nothing*）。
+所以卡片必须由插件自己贡献，这里没有可选项。
+
+内置卡片共用的那层 chrome（`PluginCard` + `card-form` 字段套件 + 对应的 CSS module）在
+`@deepseek-ai/dsh-client-ui-settings-plugins` 内部，而那个包的客户端 bundle 只导出 `apply` 与 `inject`
+（`lib/client.js` 末尾就是 `exports.apply` / `exports.inject` 两行），**仓库外的包 import 不到它**。
+
+真正共享的是 shell 自己建立的基座模块表 `PLATFORM_MODULES`：
+
+`react`、`react/jsx-runtime`、`react-dom`、`react-dom/client`、`@deepseek-ai/cordis`、
+`@deepseek-ai/dsh-client-store`、`@deepseek-ai/dsh-client-ui-slots`、
+**`@deepseek-ai/dsh-client-ui-primitives`**、`@deepseek-ai/dsh-client-ui-dockkit`
+
+于是这张卡的做法是：
+
+1. `require('@deepseek-ai/dsh-client-ui-primitives')` —— 拿到的是内置卡片用的**同一个实例**，用它渲染
+   「未保存」`Tag`、布尔字段的 `Switch`、header 的 `IconChevronDownOutline14`；
+2. 其余 chrome 全部用宿主的主题 token（`--dsw-alias-*`）写，规则与内置卡片**一条对一条**（数值取自带内的
+   `PluginCard.module.css` / `fields.module.css`，不是目测），并以 `style[data-plugin-css]` 注入、域名限定在 `.dswwsc-*`。
+   好处是换主题、切深浅色时卡片跟着变：颜色全是 token，样式表里**没有任何十六进制或 rgba 字面量**
+   （单元测试对这条做断言）。
+
+> 明确没有采用的两条路：直接 import 那个内部包（导不出来），以及借用它已注入的哈希类名（`.YyYd_a_card` 之类）——
+> 后者在任何一次宿主重构后都会静默失效。
 
 ## 开发
 

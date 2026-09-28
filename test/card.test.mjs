@@ -51,6 +51,34 @@ function resolveFromHarness(specifier) {
 const React = resolveFromHarness('react');
 const renderToStaticMarkup = resolveFromHarness('react-dom/server')?.renderToStaticMarkup;
 
+/** The baseline module the web shell seeds that the card draws its UI from. */
+const PRIMITIVES = '@deepseek-ai/dsh-client-ui-primitives';
+
+/**
+ * Stand in for the baseline primitives module. The shell always seeds the real
+ * one; a stub keeps these tests hermetic (a browser-only React component tree
+ * cannot be imported into Node) while still proving the card asks that module
+ * for the parts it renders.
+ * @param react - the module to build the stub components from.
+ * @returns the stub exports.
+ */
+function primitivesStub(react) {
+	if (react === undefined) return {};
+	const el = react.createElement;
+	return {
+		Tag: (props) => el('span', { 'data-test-tag': props.tone ?? '', className: props.className }, props.children),
+		IconChevronDownOutline14: (props) => el('svg', { 'data-test-chevron': '', viewBox: '0 0 16 16', className: props.className }),
+		Switch: (props) => el('button', {
+			type: 'button',
+			role: 'switch',
+			'aria-checked': props.checked === true,
+			disabled: props.disabled,
+			className: props.className,
+			onClick: () => props.onChange(props.checked !== true),
+		}, props.label),
+	};
+}
+
 /**
  * Load the bundle through the loader format it ships in.
  * @param react - the module the bundle's `require('react')` answers with.
@@ -69,10 +97,15 @@ async function loadClientBundle(react) {
 	}
 	assert.ok(entry, 'the bundle must register one module');
 	assert.equal(entry.id, 'dsh-web-search-clinepass');
-	return entry.factory((specifier) => {
+	const required = [];
+	const exports = entry.factory((specifier) => {
+		required.push(specifier);
 		if (specifier === 'react') return react;
+		if (specifier === PRIMITIVES) return primitivesStub(react);
 		throw new Error('unexpected require: ' + specifier);
 	});
+	exports.__required = required;
+	return exports;
 }
 
 function fakeScope(options = {}) {
@@ -180,7 +213,7 @@ test('the card starts collapsed and only its header is rendered', async (t) => {
 	assert.match(markup, /aria-expanded="false"/u);
 	assert.doesNotMatch(markup, /web-search-clinepass-tool/u, 'the body stays out of the DOM while collapsed');
 	assert.match(markup, /网页搜索（当前模型）/u);
-	assert.match(markup, /viewBox="0 0 16 16"/u, 'the header carries the chevron');
+	assert.match(markup, /data-test-chevron/u, 'the header carries the chevron the baseline module provides');
 });
 
 test('a missing namespace renders the unavailable state instead of crashing', async (t) => {
@@ -191,3 +224,32 @@ test('a missing namespace renders the unavailable state instead of crashing', as
 	assert.match(markup, /本部署不对外暴露/u);
 });
 
+test('the card draws its chrome from the deployment instead of inventing one', async () => {
+	const module = await loadClientBundle({});
+	const { CSS, CSS_ID, C } = module.__internals;
+	assert.ok(module.__required.includes(PRIMITIVES), 'the baseline primitives module is what the card styles itself with');
+	assert.equal(CSS_ID, 'dsh-web-search-clinepass/card.css');
+	assert.ok(CSS.includes('var(--dsw-alias-'), 'the chrome reads deployment theme tokens');
+	assert.doesNotMatch(CSS, /#[0-9a-fA-F]{3,8}\b/u, 'no literal colour of its own');
+	assert.doesNotMatch(CSS, /rgba?\(/u, 'no literal colour of its own');
+	// Every rule is namespaced, so the card cannot leak styles into the page or
+	// collide with the shipped card sheets.
+	for (const [, selector] of CSS.matchAll(/(?:^|[}])([^@{}]+)[{]/gu)) {
+		for (const one of selector.split(',')) {
+			assert.ok(one.trim().startsWith('.dswwsc-'), 'rule ' + one.trim() + ' is namespaced to this card');
+		}
+	}
+	assert.equal(C.card, 'dswwsc-card');
+});
+
+test('the card renders the baseline Tag, Switch, and chevron it was handed', async (t) => {
+	if (React === undefined || renderToStaticMarkup === undefined) { t.skip('react-dom is not available on this machine'); return; }
+	const module = await loadClientBundle(React);
+	const scope = fakeScope({ section: { tool: 'vercel:parallel_search' } });
+	const collapsed = renderToStaticMarkup(React.createElement(module.__internals.WebSearchClinepassCard, { scope }));
+	assert.match(collapsed, /data-test-chevron/u, 'the header chevron comes from the baseline module');
+	assert.doesNotMatch(collapsed, /data-test-tag/u, 'a clean card holds no unsaved marker');
+	const expanded = renderToStaticMarkup(React.createElement(module.__internals.WebSearchClinepassCard, { scope, defaultOpen: true }));
+	assert.match(expanded, /role="switch"/u, 'the boolean field is the baseline switch');
+	assert.match(expanded, /class="dswwsc-input"/u, 'the other controls carry the card field class');
+});
