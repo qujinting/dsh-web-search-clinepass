@@ -15,18 +15,23 @@ import z from '@deepseek-ai/schemastery';
 export const PROVIDER_ID = 'clinepass';
 
 /**
- * Built-in search tools a Vercel AI Gateway accepts in one tools[] entry. They
- * are executed by the gateway, not by the model, so the transcript stays one
- * assistant turn instead of a tool-call round trip the harness would have to
- * answer itself.
+ * Search tools a Vercel AI Gateway accepts in one tools[] entry on its
+ * Chat Completions API. They are executed by the gateway, not by the model, so
+ * the transcript stays one assistant turn instead of a tool-call round trip the
+ * harness would have to answer itself.
+ *
+ * Vercel documents exactly these four server-tool types for this API format:
+ * perplexity, exa, and tako take a query, parallel takes an objective, and
+ * gateway.js fills that field in per search. Browserbase's search tools are
+ * documented for the AI SDK surface only; a live probe against the ClinePass
+ * gateway accepted the id but returned no citation list at roughly six times the
+ * cost, so this provider does not offer it.
  */
 export const GATEWAY_SEARCH_TOOLS = [
 	'vercel:perplexity_search',
 	'vercel:exa_search',
 	'vercel:parallel_search',
 	'vercel:tako_search',
-	'vercel:browserbase_search',
-	'vercel:browserbase_fetch',
 ];
 
 /** Tool used when the section names none. */
@@ -85,8 +90,15 @@ export const Config = z.object({
 	tool: z.string().default(DEFAULT_TOOL),
 	/** Request timeout in milliseconds; one search is a full model turn. */
 	timeoutMs: z.number().step(1).min(1000).default(90000),
-	/** Upper bound on generated tokens for the search turn. */
-	maxTokens: z.number().step(1).min(1).default(4096),
+	/**
+	 * Upper bound on generated tokens for the search turn. 8192 is twice what a
+	 * dense answer with a source list actually needs (measured 3535 and 4176
+	 * completion tokens for one quote/table question, reasoning included), which
+	 * leaves room for a tabular answer without letting a runaway one bloat the
+	 * calling agent's context - the answer becomes that agent's input on every
+	 * later turn.
+	 */
+	maxTokens: z.number().step(1).min(1).default(8192),
 	/** Sampling temperature; omitted from the request while unset. */
 	temperature: z.number(),
 	/** Upper bound on sources returned to the seam (the seam caps again). */

@@ -88,6 +88,42 @@ function mergeSources(primary, secondary, maxSources) {
 }
 
 /**
+ * Per-tool keys the gateway's Chat Completions server-tool format expects. The
+ * first is the field the tool cannot run without - Vercel's own table requires
+ * a query for perplexity, exa, and tako, and an objective for parallel - and the
+ * second, where the tool has one, is how many results it may return.
+ */
+const TOOL_CONFIG = {
+	'vercel:perplexity_search': { input: 'query', results: 'max_results' },
+	'vercel:exa_search': { input: 'query', results: 'num_results' },
+	'vercel:parallel_search': { input: 'objective', results: 'max_results' },
+	'vercel:tako_search': { input: 'query' },
+};
+
+/**
+ * Build the one tools[] entry for a search, carrying this search's own input as
+ * the gateway's developer default.
+ *
+ * The gateway otherwise lets the model invent the search input, which turns one
+ * question into several differently-worded searches; stating it here keeps the
+ * retrieval anchored to the query the harness actually received. A tool id this
+ * table does not describe is sent bare, exactly as before, because inventing a
+ * config for an unknown schema is how a request starts failing.
+ *
+ * @param tool - the provider-executed tool id.
+ * @param query - the query the model-facing tool received.
+ * @param maxResults - result cap to ask the search backend for.
+ * @returns the tools[] entry.
+ */
+export function toolEntry(tool, query, maxResults) {
+	const spec = Object.prototype.hasOwnProperty.call(TOOL_CONFIG, tool) ? TOOL_CONFIG[tool] : undefined;
+	if (spec === undefined) return { type: tool };
+	const config = { [spec.input]: query };
+	if (spec.results !== undefined && Number.isInteger(maxResults) && maxResults > 0) config[spec.results] = maxResults;
+	return { type: tool, config };
+}
+
+/**
  * Run one search through the selected route's chat-completions endpoint.
  *
  * @param options - the plugin context, resolved section, target route, query, caller signal, and source cap.
@@ -112,7 +148,7 @@ export async function searchWithGateway(options) {
 			{ role: 'system', content: SEARCH_SYSTEM_PROMPT },
 			{ role: 'user', content: buildSearchInstruction(query, config.instructions) },
 		],
-		tools: [{ type: target.tool }],
+		tools: [toolEntry(target.tool, query, maxSources)],
 		max_tokens: Number.isInteger(config.maxTokens) && config.maxTokens > 0 ? config.maxTokens : 2048,
 		stream: false,
 	};

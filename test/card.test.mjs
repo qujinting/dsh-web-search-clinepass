@@ -168,7 +168,7 @@ test('the write planner stores only real changes and clears defaults', async () 
 	const { buildOps, readDraft, clearOps, FIELDS } = module.__internals;
 	const defaults = readDraft(undefined);
 	assert.equal(defaults.tool, 'vercel:perplexity_search');
-	assert.equal(defaults.maxTokens, 4096);
+	assert.equal(defaults.maxTokens, 8192);
 	assert.equal(defaults.enabled, true);
 	assert.deepEqual(buildOps(defaults, {}, {}), [], 'an untouched default section writes nothing');
 	const changed = Object.assign({}, defaults, { tool: 'vercel:parallel_search', maxSources: 4 });
@@ -186,10 +186,22 @@ test('the write planner stores only real changes and clears defaults', async () 
 	assert.equal(FIELDS.length, 8);
 });
 
+test('the card offers exactly the four tools this API format documents', async () => {
+	const module = await loadClientBundle({});
+	assert.deepEqual(module.__internals.TOOLS, [
+		'vercel:perplexity_search',
+		'vercel:exa_search',
+		'vercel:parallel_search',
+		'vercel:tako_search',
+	], 'browserbase tools are not offered: undocumented here and measured at six times the cost with no citations');
+	assert.deepEqual(module.__internals.FIELDS.find((field) => field.key === 'tool').options, module.__internals.TOOLS);
+	assert.equal(module.__internals.FIELDS.find((field) => field.key === 'maxTokens').def, 8192);
+});
+
 test('a section that already matches the defaults writes nothing', async () => {
 	const module = await loadClientBundle({});
 	const { buildOps, readDraft } = module.__internals;
-	const draft = readDraft({ tool: 'vercel:perplexity_search', maxSources: 10, timeoutMs: 90000, maxTokens: 4096, enabled: true });
+	const draft = readDraft({ tool: 'vercel:perplexity_search', maxSources: 10, timeoutMs: 90000, maxTokens: 8192, enabled: true });
 	assert.deepEqual(buildOps(draft, { tool: 'vercel:perplexity_search' }, {}), []);
 });
 

@@ -94,10 +94,10 @@ node install.mjs --profile web --uninstall
 | `routes` | `{}` | 按 LLM 路由 id 覆写 `api` / `baseURL` / `apiKeyEnv` / `apiKey` / `headers` / `tool`。 |
 | `fallback.provider` / `fallback.model` | 空 | 会话模型不可用时的兜底路由（同样走 `routes` / `llm-pi-ai` 解析）。 |
 | `timeoutMs` | `90000` | 单次搜索超时；一次搜索就是一次完整的模型回合。注意 `dsh-tool-web` 自己的 `searchTimeoutMs`（base 里是 60000）才是模型侧的实际外框——实测最慢一次 30.7s。 |
-| `maxTokens` | `4096` | 搜索回合的输出上限。太小会让来源列表被截断（实测 2048 时确有截断）。 |
+| `maxTokens` | `8192` | 搜索回合的输出上限。实测一次问答的 `completion_tokens` 是 **3535 / 4176**（含推理 token），4096 已经顶到天花板；一旦 `finish_reason` 变成 `length`，被截掉的往往正是末尾的 `Sources:` 段。8192 = 实测的 2 倍余量，既不会截断，也仍然有限（回答会变成调用方 agent 的上下文，之后每轮都要按输入 token 重付）。 |
 | `temperature` | 未设置 | 不写就不发这个字段（部分推理模型会拒绝它）。 |
 | `maxSources` | `10` | 返回给 seam 的来源上限；`dsh-tool-web` 的 `searchMaxResults` 还会再截一次。 |
-| `instructions` | 空 | 追加到搜索指令末尾的额外要求。 |
+| `instructions` | 空 | 追加到 **user 消息**末尾的额外要求（**不是** system prompt——见下）。 |
 
 > 这里**没有**「把搜索记录写进会话日志」的开关：DSH 会因此拒绝加载整份会话，原因见《为什么不再写会话日志事件》。
 
@@ -106,18 +106,51 @@ node install.mjs --profile web --uninstall
 
 ## 工具选择与花费
 
-网关报错时列出的可执行工具共有 6 个：`vercel:perplexity_search`、`vercel:exa_search`、`vercel:parallel_search`、
-`vercel:tako_search`、`vercel:browserbase_search`、`vercel:browserbase_fetch`。本插件默认用第一个，
-改 `tool` 即可切换。同一问题上实测（网关计费 `gatewayCost`，**每次搜索回合**，非每次检索）：
+AI Gateway 的 **Chat Completions** API（也就是本插件走的这条）文档里只列了 4 个服务端搜索工具，
+本插件也只提供这 4 个；改 `tool` 即可切换：
 
-| 工具 | 来源条数 | 单次 `gatewayCost` |
-|---|---|---|
-| `vercel:perplexity_search` | 4–11 | ≈ $0.011–0.012 |
-| `vercel:parallel_search` | 4–7 | ≈ $0.0066–0.0112（最便宜） |
-| `vercel:exa_search` | 3–7 | ≈ $0.0176 |
+| 工具 | 搜索后端 | 必填 config | 单价（网关侧） | 适合 |
+|---|---|---|---|---|
+| `vercel:perplexity_search` | Perplexity Search API | `query` | **$5 / 1000 次** | 通用首选：自带引用、支持时效/地区/语言/域名过滤、`maxResults` 1–20 |
+| `vercel:parallel_search` | Parallel AI Search | `objective` | **$5 / 1000 次**（含 10 条，超出 $1/1000） | 研究型问题：LLM 优化的摘录，`mode` 可选 `one-shot` / `agentic` |
+| `vercel:exa_search` | Exa | `query` | **$7 / 1000 次**（≤10 条） | 要按域名 / 日期 / 类型（`news`、`research paper`…）筛选，或要更省 token 的摘录 |
+| `vercel:tako_search` | Tako | `query` | **$7 / 1000 次**（instant/fast）、**$12 / 1000 次**（deep） | 只有需要它的实时知识图谱（金融 / 体育 / 天气 / 宏观 / 政治）时才值 |
 
-注意：`dsh-tool-web` 会把 `queries` 数组里的每个 query **并发**各跑一次搜索，
+**为什么不提供 `browserbase_search` / `browserbase_fetch`**：Vercel 只为 AI SDK 表面提供
+`gateway.tools.browserbaseSearch()`，Chat Completions 的 server-tool 表里没有这两个 id。实测 ClinePass 端点**接受**
+`vercel:browserbase_search`（HTTP 200），但一次请求里模型自己搜了 **34 次**、烧掉 17.6 万 prompt token、计费
+**$0.2645**，最后只给出 1314 字符、**0 条引用**的回答（内容基本是"我再搜一下"）。因此从选项里去掉。
+
+### 计费是按「调用次数」，不是按请求
+
+一次 `web_search` 里模型可以自己决定搜几次，网关在 `message.provider_metadata.gateway.gatewayToolCalls` 里
+报告次数。同一类问题实测（`gatewayCost`，**每次 `web_search`**）：
+
+| 工具 | 搜索次数 | 来源 | `gatewayCost` |
+|---|---|---|---|
+| `vercel:perplexity_search` | 6 → **4** | 17 → 10 | $0.0430 → **$0.0298** |
+| `vercel:parallel_search` | 4 → **2** | 17 → 10 | $0.0361 → **$0.0202** |
+| `vercel:browserbase_search`（已移除） | 34 | 0 | $0.2645 |
+
+右列是加上 system prompt 里的「最多 3 次搜索」之后的实测值；`$5/1000` 是按**每次检索**收的，
+所以 6 次检索光工具费就 $0.03——**搜索次数才是成本主因**，比输出长度重要得多。
+指令是建议性的：实测仍有 4 次的情况（不是硬上限；Chat Completions 格式没有"最多用几次"的字段）。
+
+另外：`dsh-tool-web` 会把 `queries` 数组里的每个 query **并发**各跑一次搜索，
 所以一次 `web_search({queries:[q1,q2,q3,q4]})` 就是 4 次模型回合。想省钱就用单条 query。
+
+### 每次搜索都把 query 交给网关当默认值
+
+`tools[]` 这一项不是裸 id，而是带上本次搜索的输入（`gateway.js` 的 `toolEntry()`）：
+
+```json
+{ "type": "vercel:perplexity_search", "config": { "query": "…", "max_results": 10 } }
+```
+
+perplexity / exa / tako 用 `query`，parallel 用 `objective`（各自 schema 的必填字段），
+结果条数用 `max_results`（exa 是 `num_results`）。文档说 config 是"开发者默认值、会覆盖模型生成的值"，
+这样检索锚定在 harness 真正收到的那条 query 上，而不是让模型自己改写。**未知的 tool id 仍然只发裸 id**——
+给不认识的 schema 编 config 只会让请求开始报错。
 
 ## 工作原理（细节）
 
@@ -131,7 +164,8 @@ CurrentModelSearchProvider.search()
    ├─ 选模型   agent.session.requestHeader().config  →  agent.options  →  settings['agent-default-model']
    ├─ 解路由   settings['llm-pi-ai'].providers[provider]  +  本插件 routes/显式钉死
    ├─ 取凭据   ctx.credentials.resolve(apiKeyEnv)  →  launchEnvironment
-   ├─ 发请求   POST {baseURL}/chat/completions   tools:[{type:'vercel:perplexity_search'}]
+   ├─ 发请求   POST {baseURL}/chat/completions
+   │            tools:[{type:'vercel:perplexity_search', config:{query, max_results}}]
    │            （供应商端执行：网关自己跑检索，模型侧仍然只有一轮 assistant 输出）
    └─ 解析     message.content 末尾的 Sources: 段落 → markdown 链接 + 裸 URL → 去重、取标题、截断
 ```
@@ -156,14 +190,15 @@ Sources:
 
 ## 已验证到哪一步
 
-- **单元测试** `npm test`：**41 项**。解析与路由解析 19 项（中文标点、markdown 链接、去重、截断、会话跟随、切换模型、协议不兼容、显式钉死、fallback），
-  搜索路径与修复工具 12 项（搜索不写会话事件、不可用路由不碰会话、schema 不再暴露写入开关、未支持事件识别、
+- **单元测试** `npm test`：**45 项**。解析与路由解析 19 项（中文标点、markdown 链接、去重、截断、会话跟随、切换模型、协议不兼容、显式钉死、fallback），
+  搜索路径与修复工具 15 项（搜索不写会话事件、不可用路由不碰会话、schema 不再暴露写入开关、请求体带 `tools[].config`、
+  四个工具各自的 config 字段映射、未知 tool id 只发裸 id、system prompt 的搜索次数上限、未支持事件识别、
   信封标记、帧结构保持、dry-run、活跃会话与 `session.lock` 保护、只扫描当前代际），
-  浏览器半边 10 项（槽位注册的 name/key/inject、等待 ledger 后再注册、写入计划器、默认值即清除覆盖、
+  浏览器半边 11 项（槽位注册的 name/key/inject、等待 ledger 后再注册、写入计划器、默认值即清除覆盖、
   默认折叠只渲染 header、命名空间缺失时的降级渲染、样式表只读主题 token 且全部命名空间化、Tag/Switch/chevron 走基座模块、
-  布尔字段是「左标签 + 右开关」的 toggle row、搜索工具是单选 radio 列表且页面里没有 select）。
-  其中 6 项渲染测试需要 `react-dom`，缺失时跳过（`npm test` 报 35 通过 + 6 跳过）；
-  用真 React 18.3.1 跑过全 **41 项（0 skipped）**。
+  布尔字段是「左标签 + 右开关」的 toggle row、搜索工具是单选 radio 列表且页面里没有 select、只提供文档里的四个工具）。
+  其中 6 项渲染测试需要 `react-dom`，缺失时跳过（`npm test` 报 39 通过 + 6 跳过）；
+  用真 React 18.3.1 跑过全 **45 项（0 skipped）**。
 - **真实 GUI 验收（与内置卡片逐项对齐）**：用本机 Chrome 走 CDP 直连正在运行的 `dsh web`（临时 profile + 用本机
   `client-connection/browser-session` 签名密钥铸的会话 cookie，密钥不出本机），把这张卡和内置「网页搜索」卡放在**同一页**逐项量：
   折叠态两张卡都是 **564×75**（header padding 14/16、gap 12、标题 15px/600、摘要 13px、chevron 14×14 且 `viewBox="0 0 14 14"`）；
@@ -176,9 +211,13 @@ Sources:
   `gap:16px`、开关外框 36×20 且贴右（右间距 0px），与内置的 toggle row 完全一致；搜索工具的单选组框
   （border 1px rgba(0,0,0,.16)、radius 8、padding 10、gap 6、max-height 280、overflow auto）与内置 Subagent 卡
   的选择列表 fieldset **逐项相同**，行内 padding 6 / radius 6 / gap 8 / 原生 radio 13×13 也一致；
-  6 个选项同一个 `name`、只有一个是 checked，页面里 `<select>` 数量为 0。
+  4 个选项同一个 `name`、只有一个是 checked，页面里 `<select>` 数量为 0。
 - **真实 seam 集成** `node test/live-gateway.mjs`：用真实的 `WebRuntime`（`@deepseek-ai/dsh-web`）注册本供应商，
   按 `searchProvider: clinepass` 选中，向 `api.cline.bot` 实发一次搜索，断言来源非空且 `maxResults` 生效。
+- **真实网关实测（搜索次数与 tools[].config）**：走插件自己的 `searchWithGateway` 打真实网关，
+  perplexity 与 parallel 各自 200 / `finish_reason: stop`、来源各 10 条、没有截断提示；
+  `gatewayToolCalls` 分别为 4 与 2，`gatewayCost` 分别为 **$0.0298 / $0.0202**
+  （加「最多 3 次搜索」之前的同一类问题是 6 / 4 次、$0.0430 / $0.0361）。
 - **真实 DSH 端到端**：临时 profile（`@deepseek-ai/dsh-base` + `@deepseek-ai/dsh-headless` + 本插件）跑一次真实任务，带回真实来源链接。
   端到端跑通后**不再产生** `web/clinepass-search-request` 事件；早期版本写进会话日志的那些事件已用
   `tools/repair-session-events.mjs` 补上 `ignorable: true`（见《为什么不再写会话日志事件》），会话可以正常重新加载。
@@ -246,12 +285,12 @@ node tools/repair-session-events.mjs repair --session 80bad975-cea1-48af-b509-f2
 所以「立刻注册」会把这张卡顶到所有内置卡片之前。实现改为**等 ledger 里已经有卡片再入列** ——
 于是它排在本机加载时已有的那些配置之后，而不是钉死在最后（之后再注册的卡片依然排在它后面）。
 
-卡片可改的字段：`enabled`、`tool`（6 个网关搜索工具）、`maxSources`、`timeoutMs`、`maxTokens`、
+卡片可改的字段：`enabled`、`tool`（文档里的 4 个网关搜索工具）、`maxSources`、`timeoutMs`、`maxTokens`、
 `provider` / `model`（钉死路由，可选）、`instructions`。改完点保存；字段恢复成默认值时写的是 `unset`
 （清除覆盖、重新继承），每个被覆盖的字段旁边有单独的「恢复默认」。
 
 控件形态跟内置卡片对齐：布尔字段是**左标签 + 右开关**的一行（内置 Subagent 卡 toggle row 的形态，开关贴最右）；
-`tool` 是**单选列表**而不是 `<select>` —— 6 个选项一次全看得见，分组框的边框 / 圆角 / padding / 行距照内置
+`tool` 是**单选列表**而不是 `<select>` —— 全部选项一次看得见，分组框的边框 / 圆角 / padding / 行距照内置
 Subagent 卡的选择列表来（原生 radio，不做自定义绘制）。
 
 浏览器半边是**手写的** `lib/client.js`，按所有插件 bundle 的加载格式（`window.__ModuleLoader__.load({ id, factory })`）

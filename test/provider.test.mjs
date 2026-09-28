@@ -85,3 +85,40 @@ test('the settings section no longer advertises a session-log write', async () =
 	const resolved = new Config({});
 	assert.equal(Object.hasOwn(resolved, 'recordRequests'), false);
 });
+
+test('the request carries the documented config for the selected tool', async () => {
+	const originalFetch = globalThis.fetch;
+	const seen = [];
+	globalThis.fetch = async (url, init) => { seen.push({ url: String(url), body: JSON.parse(String(init?.body)) }); return gatewayResponse(); };
+	try {
+		const provider = new CurrentModelSearchProvider(ctxWith({ session: { append: () => {} } }), () => CONFIG);
+		await provider.search({ query: '扬州东站 到 济南西 高铁 二等座票价', maxResults: 5 });
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+	assert.equal(seen.length, 1, 'one search is exactly one request');
+	const [request] = seen;
+	assert.match(request.url, /\/chat\/completions$/u);
+	assert.deepEqual(request.body.tools, [{
+		type: 'vercel:perplexity_search',
+		config: { query: '扬州东站 到 济南西 高铁 二等座票价', max_results: 5 },
+	}], 'the search input and result cap ride the tool entry, not a model guess');
+	assert.equal(request.body.max_tokens, 2048, 'an unset maxTokens still sends the code default');
+	assert.equal(request.body.stream, false);
+});
+
+test('every documented tool gets the field its own schema requires', async () => {
+	const { toolEntry } = await import('../src/gateway.js');
+	assert.deepEqual(toolEntry('vercel:perplexity_search', 'q', 7), { type: 'vercel:perplexity_search', config: { query: 'q', max_results: 7 } });
+	assert.deepEqual(toolEntry('vercel:exa_search', 'q', 7), { type: 'vercel:exa_search', config: { query: 'q', num_results: 7 } });
+	assert.deepEqual(toolEntry('vercel:parallel_search', 'q', 7), { type: 'vercel:parallel_search', config: { objective: 'q', max_results: 7 } });
+	assert.deepEqual(toolEntry('vercel:tako_search', 'q', 7), { type: 'vercel:tako_search', config: { query: 'q' } });
+	assert.deepEqual(toolEntry('vendor:unknown_search', 'q', 7), { type: 'vendor:unknown_search' }, 'an unknown tool id is sent bare rather than with an invented schema');
+	assert.deepEqual(toolEntry('vercel:perplexity_search', 'q', 0), { type: 'vercel:perplexity_search', config: { query: 'q' } });
+});
+
+test('the search instruction caps how many searches one answer may run', async () => {
+	const { SEARCH_SYSTEM_PROMPT } = await import('../src/prompt.js');
+	assert.match(SEARCH_SYSTEM_PROMPT, /never more than three/u, 'an uncapped model measured 6 and 34 searches in one request');
+	assert.match(SEARCH_SYSTEM_PROMPT, /one search is usually enough/u);
+});
