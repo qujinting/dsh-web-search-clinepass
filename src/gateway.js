@@ -17,7 +17,7 @@ import { resolveApiKey } from './route.js';
 import { normalizeConfig } from './config.js';
 
 /** Attribution header sent on every request. */
-const USER_AGENT = 'dsh-web-search-clinepass/0.1.0';
+const USER_AGENT = 'dsh-web-search-clinepass/0.3.2';
 
 /** True for a fetch or AbortSignal abort. */
 function isAbortError(error) {

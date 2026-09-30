@@ -15,7 +15,8 @@
  *   auto: false })` says this plugin ships its own page instead of letting a
  *   client generate one from the schema, and the fields marked volatile in
  *   config.js are the ones that page edits; the loader keeps their references
- *   live, so the provider reads fresh values on every search.
+ *   live, so the provider reads fresh values on every search. dsh 0.2.0-rc.2
+ *   keeps this model unchanged, so this branch serves it too.
  * - dsh 0.1.5: the settings service owns plugin sections, so the same schema is
  *   installed as a section under SETTINGS_NAMESPACE, and the section becomes the
  *   authoritative source while it exists.

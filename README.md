@@ -45,7 +45,7 @@
 
 按 dsh 版本选一条路。两条路装的是同一个 bundle，区别只在**谁改 profile 清单**，以及装完卡片出现在哪。
 
-### dsh 0.1.7 及以后（用内置插件管理器）
+### dsh 0.1.7 及以后（含 0.2.0，用内置插件管理器）
 
 ```powershell
 # 从 npm
@@ -55,6 +55,8 @@ dsh plugin --profile web add dsh-web-search-clinepass
 dsh plugin --profile web add file:D:/project/qujinting/dsh-plugin/web-search
 ```
 
+- **0.2.0-rc.2 起 `dsh` 命令随桌面版打包**，不再要求你另装 Node / pnpm；第一次用先点菜单栏的
+  **「Manage dsh command」** 把它装进 PATH，之后上面两条命令照常用（`--profile` 换成要装的 profile，桌面版是 `desktop`）。
 - 插件管理器会跑 pnpm：把包装进 `<DSH_HOME>/profiles/web/node_modules`，并把 `dsh-web-search-clinepass`
   追加进该 profile 的 `dsh.profile.bundles`（它自己会先备份 `package.json.bak-install-<时间戳>`）。
 - **重启 dsh 后生效**（bundle 清单在启动时组装）。可用 `dsh --profile web --dump-config` 先看拼装结果，不会启动服务。
@@ -106,7 +108,8 @@ New-Item -ItemType Junction -Path node_modules\dsh-web-search-clinepass -Target 
 
 dsh 0.1.7 重做了设置：插件的 Config 条目**就是**它的设置项，可编辑字段要标 `.volatile()`，写入落在 profile 的
 `cordis.patch.yml`；0.1.5 则是 `settings.installSection()` 注册一个 plugin-owned section，落在 `settings.yaml`。
-本插件用一个包同时支持两者：
+本插件用一个包同时支持两者。**dsh 0.2.0-rc.2 沿用 0.1.7 那一套**——`configure({ auto })` 在，`installSection()`
+与 `get(ns)` 都不在——所以下表 0.1.7 那一列同时就是 0.2.0 的行为，本插件没有为它加分支：
 
 | | dsh 0.1.5 | dsh 0.1.7+ |
 |---|---|---|
@@ -271,20 +274,33 @@ Sources:
 
 ## 已验证到哪一步
 
-- **单元测试** `npm test`：**59 项**。解析与路由解析 **22 项**（中文标点、markdown 链接、去重、截断、会话跟随、切换模型、协议不兼容、显式钉死、fallback、
+- **单元测试** `npm test`：**61 项，全绿、0 skipped**。解析与路由解析 **22 项**（中文标点、markdown 链接、去重、截断、会话跟随、切换模型、协议不兼容、显式钉死、fallback、
   以及 0.1.7 的读法：只有 `describe()` 没有 `get()` 时仍能解出路由与端点、`agent-default-model` 同样可读、投影里没有该命名空间时仍判不可用），
   搜索路径与修复工具 15 项（搜索不写会话事件、不可用路由不碰会话、schema 不再暴露写入开关、请求体带 `tools[].config`、
   四个工具各自的 config 字段映射、未知 tool id 只发裸 id、system prompt 的搜索次数上限、未支持事件识别、
   信封标记、帧结构保持、dry-run、活跃会话与 `session.lock` 保护、只扫描当前代际），
   **host 半边 5 项**（0.1.7 走 `configure({auto:false})` 并读活引用、0.1.5 走 `installSection` 且优先用 section、
   两套都没有时退回组合条目、`normalizeConfig` 摊平引用/透传普通值、可编辑字段标记为 volatile），
-  浏览器半边 17 项（两条注册路径各一项：0.1.7 的 `plugins.row.config` 键 `<包>#<行>`、0.1.5 的 `settings.plugin.item` 且等 ledger；
+  浏览器半边 19 项（两条注册路径各一项：0.1.7 的 `plugins.row.config` 键 `<包>#<行>`、0.1.5 的 `settings.plugin.item` 且等 ledger；
   0.1.7 页面视图渲染字段、summary 视图不需要 form、未服务的条目渲染空、只读条目禁用全部按钮；写入计划器、默认值即清除覆盖、
   默认折叠只渲染 header、命名空间缺失时的降级渲染、样式表只读主题 token 且全部命名空间化、Tag/Switch/chevron 走基座模块、
+  折叠 chevron 依次回退 `IconChevronDownOutline14` → `IconChevronDownOutlineMedium` → `IconChevronDownOutlineRegular`，
+  三个名字都没有时只少画一个图标、header 照常渲染、
   布尔字段是「左标签 + 右开关」的 toggle row、搜索工具是单选 radio 列表且页面里没有 select、只提供文档里的四个工具、
   搜索工具那一栏明说次数上限只是建议）。
-  其中 10 项渲染测试需要 `react-dom`，缺失时跳过（本机 `npm test` 报 49 通过 + 10 跳过；
-   之前 56 项时用真 React 18.3.1 跑过全 56 项、0 skipped）。
+  其中 12 项渲染测试需要 `react-dom`，缺失时优雅跳过；`npm run link-runtime -- --with-react` 会把它一并装好，
+  所以本机现在报的是 **61 通过 + 0 跳过**（此前闭包来自旧的全局 dsh 安装，只能跑出 49 通过 + 10 跳过）。
+- **真实 dsh 0.2.0-rc.2 验收（0.3.2）**：桌面版 0.2.0-rc.2（内核 `@deepseek-ai/dsh` / `dsh-web` / `dsh-settings`
+  同为 0.2.0-rc.2）上**不改一行代码**即可运行。host 半边：`include:web-search-clinepass` 正常挂载，
+  `ctx.web.registerSearchProvider` 与 `settings.configure({ auto: false }, owner)` 签名未变，`settings.describe()`
+  仍返回 `{ ns, value, user, writable }`（即 `readSettings()` 的 0.1.7 那条读法继续有效），`llm-pi-ai` 命名空间与
+  `providers.clinepass` 的 `api` / `baseURL` / `apiKeyEnv` 完好，真发一次 `web_search` 返回带来源的回答。
+  client 半边：用 CDP 走真实 GUI（左侧「插件」→ 已安装 → 组件行右侧的配置按钮）确认卡片仍渲染出**全部 8 个字段**
+  （1 开关 / 4 单选 / 3 数字 / 3 文本 / 1 文本域 + 三颗底部按钮），`plugins.row.config` 槽由 plugin manager 声明并
+  渲染 `dsh-web-search-clinepass#web-search-clinepass`，控制台 0 error；基座 `Tag({ tone })` 与
+  `Switch({ checked, onChange, label, disabled })` 签名未变，卡片用到的 12 个 `--dsw-alias-*` token 在 0.2.0 全部存在。
+  **0.2.0 唯一改掉的名字是图标**：`IconChevronDownOutline14` 被 `IconChevronDownOutlineMedium` / `Regular` 取代
+  （在整个载荷里 0 次出现），它只出现在 0.1.5 那张卡的 header 里，所以此前不触发；0.3.2 起按名字依次回退。
 - **真实 0.1.7 settings 实现（0.3.1 的回归验证）**：不启动整个 harness，而是直接把**真实的**
   `SettingsForms.prototype.describe`（未打桩，只喂给它一个 `configEditor.configuration()` 的替身）跑在**真实的**
   `@deepseek-ai/dsh-llm-pi-ai` 的 Config schema 与本机 profile 的真实路由值上：`describe()` 输出
@@ -438,21 +454,22 @@ namespace **什么都不渲染**（`tab-store` 的原话：*A served namespace n
 ## 开发
 
 ```powershell
-# 本仓库是纯 ESM JS（无构建步骤）。测试需要 DSH 的模块闭包可解析：
-New-Item -ItemType Junction -Path node_modules -Target $env:USERPROFILE\.dsh\profiles\node_modules
+# 本仓库是纯 ESM JS（无构建步骤）。测试要把 DSH 的模块闭包解析出来，先从已安装的 DSH 里抽一份：
+npm run link-runtime -- --asar "<DSH 安装目录>\resources\app.asar" --with-react
 
 npm test                      # 单元测试（不花钱）
 node test/live-gateway.mjs    # 真实网关 + 真实 seam（会花一次搜索的钱）
 ```
 
-卡片的两条静态渲染测试需要 `react-dom`（DSH 的模块闭包里没有它），否则会优雅跳过。
-想跑全 36 项就临时装一份并指过去（不写进本仓库）：
+`link-runtime` 按**真实 import 图**把 `@deepseek-ai/*` 及其传递依赖从 Electron 的 `app.asar` 抽进 `node_modules/`
+（当前闭包 22 个包 / 877 个文件，来源与版本记在 `node_modules/.dsh-harness-runtime.json`）。
+之所以不从 npm 装：registry 上的 `@deepseek-ai/dsh-web` 还停在 `0.0.1-rc.1`，和内核版本对不上。
+每次升级 DSH 后重跑一次即可（加 `--clean` 先清空再抽）。它**先拆掉 `node_modules` 上的目录联接、再建真目录**，
+不会顺着旧联接把文件写进共享的 profile 目录——早先的联接指向已被卸载的全局 dsh 与旧 monorepo 检出，
+正是 `npm test` 报 `ERR_MODULE_NOT_FOUND` 的原因。
 
-```powershell
-npm install --prefix "$env:TEMP\dsh-card-verify" react@18.3.1 react-dom@18.3.1
-$env:DSH_CARD_TEST_MODULES="$env:TEMP\dsh-card-verify"
-npm test                      # 36 项，0 skipped
-```
+源码包里没有 `react` / `react-dom`（Web UI 是预构建产物），`--with-react` 会额外装一份并复制进来，
+让 12 项渲染测试真正跑起来；不加这个参数时它们会优雅跳过（`DSH_CARD_TEST_MODULES` 仍可指向任意一份自备的模块目录）。
 
 | 文件 | 作用 |
 |---|---|
@@ -464,8 +481,9 @@ npm test                      # 36 项，0 skipped
 | `src/prompt.js` | 搜索指令（固定收尾形状是解析契约的一部分）。 |
 | `src/provider.js` | `WebSearchProvider` 实现：`available()` / `search()`（只读 seam，不写会话日志）。 |
 | `cordis.patch.yml` | bundle 层：改 `web.searchProvider` + 插入插件行。 |
-| `lib/client.js` | 浏览器半边：手写的加载器 bundle，注册设置卡片（settings.plugin.item）。 |
+| `lib/client.js` | 浏览器半边：手写的加载器 bundle，注册设置卡片（0.1.7+ 的 `plugins.row.config` / 0.1.5 的 `settings.plugin.item`）。 |
 | `tools/repair-session-events.mjs` | 扫描/修复被自定义会话事件写坏的会话日志（补 `ignorable: true`，带备份与自检）。 |
+| `tools/link-harness-runtime.mjs` | 从已安装的 DSH 载荷里抽出模块闭包到 `node_modules/`，供本地测试解析 `@deepseek-ai/*`。 |
 | `install.mjs` | 装/卸到某个 profile。 |
 
 ## 标注为 DSH 插件

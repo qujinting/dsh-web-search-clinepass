@@ -55,6 +55,12 @@ const renderToStaticMarkup = resolveFromHarness('react-dom/server')?.renderToSta
 const PRIMITIVES = '@deepseek-ai/dsh-client-ui-primitives';
 
 /**
+ * Every name the collapse chevron has shipped under, oldest first: dsh 0.1.5
+ * exported it by size, 0.2.0 exports weight variants and dropped the sized name.
+ */
+const ICON_NAMES = ['IconChevronDownOutline14', 'IconChevronDownOutlineMedium', 'IconChevronDownOutlineRegular'];
+
+/**
  * Stand in for the baseline primitives module. The shell always seeds the real
  * one; a stub keeps these tests hermetic (a browser-only React component tree
  * cannot be imported into Node) while still proving the card asks that module
@@ -62,12 +68,21 @@ const PRIMITIVES = '@deepseek-ai/dsh-client-ui-primitives';
  * @param react - the module to build the stub components from.
  * @returns the stub exports.
  */
-function primitivesStub(react) {
+function primitivesStub(react, chevron = ICON_NAMES[0]) {
 	if (react === undefined) return {};
 	const el = react.createElement;
+	// The icon family was renamed between harness generations; a stub serves
+	// exactly one of the three names so the card's fallback chain is exercised.
+	// `null` exports all three as empty, the worst shape a module can have.
+	const icons = {};
+	for (const name of chevron === null ? ICON_NAMES : [chevron]) {
+		icons[name] = chevron === null
+			? null
+			: (props) => el('svg', { 'data-test-chevron': '', viewBox: '0 0 16 16', className: props.className });
+	}
 	return {
 		Tag: (props) => el('span', { 'data-test-tag': props.tone ?? '', className: props.className }, props.children),
-		IconChevronDownOutline14: (props) => el('svg', { 'data-test-chevron': '', viewBox: '0 0 16 16', className: props.className }),
+		...icons,
 		Switch: (props) => el('button', {
 			type: 'button',
 			role: 'switch',
@@ -82,8 +97,9 @@ function primitivesStub(react) {
 /**
  * Load the bundle through the loader format it ships in.
  * @param react - the module the bundle's `require('react')` answers with.
+ * @param primitives - an explicit primitives module, or the default stub.
  */
-async function loadClientBundle(react) {
+async function loadClientBundle(react, primitives) {
 	const source = readFileSync(join(process.cwd(), 'lib', 'client.js'), 'utf8');
 	let entry;
 	const previous = globalThis.window;
@@ -101,7 +117,7 @@ async function loadClientBundle(react) {
 	const exports = entry.factory((specifier) => {
 		required.push(specifier);
 		if (specifier === 'react') return react;
-		if (specifier === PRIMITIVES) return primitivesStub(react);
+		if (specifier === PRIMITIVES) return primitives ?? primitivesStub(react);
 		throw new Error('unexpected require: ' + specifier);
 	});
 	exports.__required = required;
@@ -406,4 +422,26 @@ test('dsh 0.1.7: a read-only entry disables every control', async (t) => {
 	const markup = renderToStaticMarkup(React.createElement(module.__internals.ModernCard, { view: 'page', form }));
 	assert.match(markup, /只读：本部署不允许写这个命名空间/u);
 	assert.doesNotMatch(markup, /<button(?![^>]*disabled)/u, 'every button is disabled while the document refuses writes');
+});
+
+test('the collapse chevron resolves whichever name the primitives ship', async (t) => {
+	if (React === undefined || renderToStaticMarkup === undefined) { t.skip('react-dom is not available on this machine'); return; }
+	const scope = fakeScope({ section: {}, user: {} });
+	for (const name of ICON_NAMES) {
+		const module = await loadClientBundle(React, primitivesStub(React, name));
+		const markup = renderToStaticMarkup(React.createElement(module.__internals.WebSearchClinepassCard, { scope }));
+		assert.match(markup, /data-test-chevron/u, name + ' must be the component the header renders');
+	}
+});
+
+test('a primitives module without a usable chevron still renders the header', async (t) => {
+	if (React === undefined || renderToStaticMarkup === undefined) { t.skip('react-dom is not available on this machine'); return; }
+	// All three names exported as null: the worst shape, and the one that would
+	// hand null to createElement if the guard were a bare === undefined check.
+	const module = await loadClientBundle(React, primitivesStub(React, null));
+	const scope = fakeScope({ section: {}, user: {} });
+	const markup = renderToStaticMarkup(React.createElement(module.__internals.WebSearchClinepassCard, { scope }));
+	assert.doesNotMatch(markup, /data-test-chevron/u, 'no icon is drawn when none is available');
+	assert.match(markup, /网页搜索（当前模型）/u, 'the header still renders its title');
+	assert.match(markup, /aria-expanded/u);
 });
